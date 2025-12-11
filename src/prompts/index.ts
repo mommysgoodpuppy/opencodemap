@@ -100,6 +100,33 @@ function loadStageTemplateFile(stageNumber: number): string {
 }
 
 /**
+ * Load mermaid template file from disk
+ */
+function loadMermaidTemplateFile(): string {
+  const cacheKey = 'smart/mermaid';
+
+  if (templateCache.has(cacheKey)) {
+    return templateCache.get(cacheKey)!;
+  }
+
+  const promptsDir = getPromptsDir();
+  const filePath = path.join(promptsDir, 'smart', 'mermaid.md');
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Mermaid template file not found: ${filePath}`);
+  }
+
+  let content = fs.readFileSync(filePath, 'utf-8');
+
+  // Remove markdown header if present (lines starting with #)
+  content = content.replace(/^#[^\n]*\n+/, '').trim();
+
+  templateCache.set(cacheKey, content);
+
+  return content;
+}
+
+/**
  * Replace template variables with actual values
  * Variables are in the format {{ variable_name }}
  */
@@ -150,6 +177,14 @@ export function loadStagePrompt(
  */
 export function getStageCount(): number {
   return 5;
+}
+
+/**
+ * Load and process mermaid prompt template
+ */
+export function loadMermaidPrompt(variables: PromptVariables = {}): string {
+  const template = loadMermaidTemplateFile();
+  return substituteVariables(template, variables);
 }
 
 /**
@@ -204,6 +239,13 @@ export function preloadTemplates(): void {
     } catch (error) {
       console.warn(`Failed to preload stage template ${i}:`, error);
     }
+  }
+
+  // Preload mermaid template
+  try {
+    loadMermaidTemplateFile();
+  } catch (error) {
+    console.warn('Failed to preload mermaid template:', error);
   }
 }
 

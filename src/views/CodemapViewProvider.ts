@@ -5,20 +5,36 @@
 import * as vscode from 'vscode';
 import type { Codemap } from '../types';
 import { generateFastCodemap, generateSmartCodemap, isConfigured, generateSuggestions } from '../agent';
-import { saveCodemap, listCodemaps, deleteCodemap, loadCodemap, getStoragePath } from '../storage/codemapStorage';
+import { saveCodemap, listCodemaps, deleteCodemap, loadCodemap, getStoragePath, getCodemapFilePath } from '../storage/codemapStorage';
 import * as logger from '../logger';
+
+interface ActiveAgent {
+  id: string;
+  label: string;
+  startTime: number;
+}
+
+interface ProgressState {
+  totalStages: number;
+  completedStages: number;
+  activeAgents: ActiveAgent[];
+  currentPhase: string;
+}
 
 export class CodemapViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codemap.mainView';
 
   private _view?: vscode.WebviewView;
   private _codemap: Codemap | null = null;
+  private _currentCodemapFilename: string | null = null;
   private _messages: Array<{ role: string; content: string }> = [];
   private _isProcessing = false;
   private _mode: 'fast' | 'smart' = 'smart';
-  private _suggestions: Array<{ id: string; text: string; sub?: string }> = [];
+  private _suggestions: Array<{ id: string; text: string; sub?: string; startingPoints?: string[] }> = [];
   private _recentFiles: string[] = [];
   private _refreshTimer: NodeJS.Timeout | null = null;
+  private _progress: ProgressState | null = null;
+  private _unreadCodemaps: Set<string> = new Set();
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     // Track recent file access
@@ -69,9 +85,10 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     try {
       const suggestions = await generateSuggestions(this._recentFiles.slice(0, 10));
       this._suggestions = suggestions.map(s => ({
-        id: `sg-${Date.now()}-${Math.random()}`,
+        id: s.id,
         text: s.text,
-        sub: `Based on recent activity`
+        sub: s.sub || 'Based on recent activity',
+        startingPoints: s.startingPoints,
       }));
       this._updateWebview();
     } catch (error) {
@@ -121,6 +138,9 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         case 'navigate':
           this._updateWebview();
           break;
+        case 'openJson':
+          this._openCodemapJson();
+          break;
       }
     });
   }
@@ -152,6 +172,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       { role: 'assistant', content: `Loaded saved codemap: ${codemap.title}` }
     ];
     this._updateWebview();
+    // Navigate to detail page
+    this._view?.webview.postMessage({
+      type: 'navigate',
+      page: 'detail',
+    });
   }
 
   private async _handleSubmit(query: string, mode: 'fast' | 'smart') {
@@ -175,10 +200,29 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     this._mode = mode;
     this._messages = [];
     this._codemap = null;
+    
+    // Initialize progress state
+    // Stages: Research(1) + Structure(1) + Traces(N*3) + Mermaid(1)
+    // We'll update totalStages once we know the number of traces
+    this._progress = {
+      totalStages: 3, // Initial: Research + Structure + Mermaid
+      completedStages: 0,
+      activeAgents: [{
+        id: 'init',
+        label: 'Starting codemap generation...',
+        startTime: Date.now(),
+      }],
+      currentPhase: 'Starting codemap generation...',
+    };
+    
     this._updateWebview();
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     logger.info(`Workspace root: ${workspaceRoot}`);
+
+    // Track trace stages for progress calculation
+    const traceStages: Map<string, Set<number>> = new Map();
+    let numTraces = 0;
 
     const callbacks = {
       onMessage: (role: string, content: string) => {
@@ -197,13 +241,115 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       onCodemapUpdate: (codemap: Codemap) => {
         logger.info(`[Callback] onCodemapUpdate - title: ${codemap.title}, traces: ${codemap.traces.length}`);
         this._codemap = codemap;
+        
+        // Update total stages when we know the number of traces
+        if (codemap.traces.length > 0 && numTraces !== codemap.traces.length) {
+          numTraces = codemap.traces.length;
+          // Research(1) + Structure(1) + Traces(N*3) + Mermaid(1)
+          if (this._progress) {
+            this._progress.totalStages = 2 + (numTraces * 3) + 1;
+          }
+        }
+        
         this._updateWebview();
       },
       onPhaseChange: (phase: string, stageNumber: number) => {
         logger.info(`[Callback] onPhaseChange - phase: ${phase}, stage: ${stageNumber}`);
+        
+        if (this._progress) {
+          // Map phase to user-friendly progress text
+          const phaseLabels: Record<number, string> = {
+            1: 'Researching codebase...',
+            2: 'Generating codemap structure...',
+            3: 'Processing traces...',
+            6: 'Generating Mermaid diagram...',
+          };
+          
+          this._progress.currentPhase = phaseLabels[stageNumber] || phase;
+          
+          // Update completed stages based on phase
+          if (stageNumber === 2) {
+            // Research complete
+            this._progress.completedStages = 1;
+          } else if (stageNumber === 3) {
+            // Structure complete
+            this._progress.completedStages = 2;
+          } else if (stageNumber === 6) {
+            // Starting mermaid - all trace stages should be complete
+            this._progress.completedStages = 2 + (numTraces * 3);
+          }
+          
+          // Clear active agents when phase changes (except for trace processing)
+          if (stageNumber !== 3) {
+            this._progress.activeAgents = [{
+              id: `phase-${stageNumber}`,
+              label: phaseLabels[stageNumber] || phase,
+              startTime: Date.now(),
+            }];
+          }
+        }
+        
+        this._updateWebview();
       },
       onTraceProcessing: (traceId: string, stage: number, status: 'start' | 'complete') => {
         logger.debug(`[Callback] onTraceProcessing - trace: ${traceId}, stage: ${stage}, status: ${status}`);
+        
+        if (this._progress) {
+          // Track completed stages per trace
+          if (!traceStages.has(traceId)) {
+            traceStages.set(traceId, new Set());
+          }
+          
+          // Get trace title from codemap if available
+          const traceIndex = parseInt(traceId) - 1;
+          const trace = this._codemap?.traces[traceIndex];
+          const traceTitle = trace?.title ? ` "${trace.title}"` : '';
+          
+          // Map stage to user-friendly label
+          const stageLabels: Record<number, string> = {
+            3: `Generating relation tree for Trace ${traceId}${traceTitle}...`,
+            4: `Adding location decorations for Trace ${traceId}${traceTitle}...`,
+            5: `Generating trace guide for Trace ${traceId}${traceTitle}...`,
+          };
+          
+          if (status === 'start') {
+            const label = stageLabels[stage] || `Processing Trace ${traceId}...`;
+            
+            // Add to active agents
+            const existingIdx = this._progress.activeAgents.findIndex(a => a.id === `trace-${traceId}`);
+            if (existingIdx >= 0) {
+              this._progress.activeAgents[existingIdx].label = label;
+            } else {
+              this._progress.activeAgents.push({
+                id: `trace-${traceId}`,
+                label,
+                startTime: Date.now(),
+              });
+            }
+            this._progress.currentPhase = 'Processing traces...';
+          } else if (status === 'complete') {
+            // Mark stage as complete
+            traceStages.get(traceId)!.add(stage);
+            
+            // Count total completed trace stages
+            let completedTraceStages = 0;
+            for (const stages of traceStages.values()) {
+              completedTraceStages += stages.size;
+            }
+            
+            // Update progress: Research(1) + Structure(1) + completed trace stages
+            this._progress.completedStages = 2 + completedTraceStages;
+            
+            // Remove from active agents if all stages complete for this trace
+            if (traceStages.get(traceId)!.size >= 3) {
+              this._progress.activeAgents = this._progress.activeAgents.filter(
+                a => a.id !== `trace-${traceId}`
+              );
+            }
+          }
+        }
+        
+        this._updateWebview();
       },
     };
 
@@ -221,10 +367,30 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         logger.info('Saving codemap to storage...');
         const savedPath = saveCodemap(this._codemap);
         logger.info(`Codemap saved to: ${savedPath}`);
+        
+        // Extract filename from path and track it
+        const filename = savedPath.split(/[/\\]/).pop() || savedPath;
+        this._currentCodemapFilename = filename;
+        
+        // Mark as unread
+        this._unreadCodemaps.add(filename);
+        
         this._messages.push({
           role: 'assistant',
           content: `Codemap saved to: ${savedPath}`,
         });
+        
+        // Update progress to complete
+        if (this._progress) {
+          this._progress.completedStages = this._progress.totalStages;
+          this._progress.currentPhase = 'Codemap generated successfully!';
+          this._progress.activeAgents = [{
+            id: 'complete',
+            label: 'Codemap generated successfully!',
+            startTime: Date.now(),
+          }];
+        }
+        
         this._updateWebview();
       } else {
         logger.warn('No codemap was generated (this._codemap is null)');
@@ -240,6 +406,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     } finally {
       logger.info('Submit handler complete, resetting isProcessing to false');
       this._isProcessing = false;
+      this._progress = null;
       this._updateWebview();
       logger.separator('WEBVIEW SUBMIT END');
     }
@@ -253,8 +420,29 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private async _openCodemapJson() {
+    if (!this._codemap || !this._currentCodemapFilename) {
+      vscode.window.showWarningMessage('No codemap loaded');
+      return;
+    }
+
+    // Open the actual JSON file from storage
+    const filePath = getCodemapFilePath(this._currentCodemapFilename);
+    const uri = vscode.Uri.file(filePath);
+    
+    try {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+      });
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to open codemap file: ${filePath}`);
+    }
+  }
+
   private _deleteHistory(filename: string) {
     if (deleteCodemap(filename)) {
+      this._unreadCodemaps.delete(filename);
       vscode.window.showInformationMessage('Codemap deleted');
       this._updateWebview();
     }
@@ -264,10 +452,18 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     const codemap = loadCodemap(filename);
     if (codemap) {
       this._codemap = codemap;
+      this._currentCodemapFilename = filename;
+      // Mark as read
+      this._unreadCodemaps.delete(filename);
       this._messages = [
         { role: 'assistant', content: `Loaded saved codemap: ${codemap.title}` }
       ];
       this._updateWebview();
+      // Navigate to detail page
+      this._view?.webview.postMessage({
+        type: 'navigate',
+        page: 'detail',
+      });
     } else {
       vscode.window.showErrorMessage(`Failed to load codemap: ${filename}`);
     }
@@ -278,7 +474,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     return codemaps.map(({ filename, codemap }) => ({
       id: filename,
       codemap,
-      timestamp: new Date(codemap.savedAt || Date.now()).getTime()
+      timestamp: new Date(codemap.savedAt || Date.now()).getTime(),
+      isUnread: this._unreadCodemaps.has(filename),
     }));
   }
 
@@ -291,7 +488,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         isProcessing: this._isProcessing,
         mode: this._mode,
         suggestions: this._suggestions,
-        history: this._getHistory()
+        history: this._getHistory(),
+        progress: this._progress,
       });
     }
   }

@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Trash2, RefreshCw } from 'lucide-react';
-import type { Codemap, CodemapHistoryItem } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Search, Trash2, RefreshCw, Circle } from 'lucide-react';
+import type { Codemap, CodemapHistoryItem, ProgressState } from '../types';
 
 interface CodemapListProps {
   currentCodemap: Codemap | null;
   history: CodemapHistoryItem[];
   isProcessing: boolean;
+  progress?: ProgressState;
   onLoadHistory: (id: string) => void;
   onDeleteHistory: (id: string) => void;
   onRefresh: () => void;
@@ -13,16 +14,33 @@ interface CodemapListProps {
 
 /**
  * List of saved codemaps with search and actions.
+ * Shows progress indicator during generation.
  */
 export const CodemapList: React.FC<CodemapListProps> = ({
   currentCodemap,
   history,
   isProcessing,
+  progress,
   onLoadHistory,
   onDeleteHistory,
   onRefresh,
 }) => {
   const [searchText, setSearchText] = useState('');
+  const [activeAgentIndex, setActiveAgentIndex] = useState(0);
+
+  // Rotate through active agents every 2 seconds
+  useEffect(() => {
+    if (!progress || progress.activeAgents.length <= 1) {
+      setActiveAgentIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setActiveAgentIndex((prev) => (prev + 1) % progress.activeAgents.length);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [progress?.activeAgents.length]);
 
   const filteredHistory = useMemo(() => {
     if (!searchText.trim()) {
@@ -55,6 +73,14 @@ export const CodemapList: React.FC<CodemapListProps> = ({
     return currentCodemap && currentCodemap.title === item.codemap.title;
   };
 
+  // Calculate progress percentage
+  const progressPercent = progress
+    ? Math.round((progress.completedStages / progress.totalStages) * 100)
+    : 0;
+
+  // Get current active agent label
+  const currentAgentLabel = progress?.activeAgents[activeAgentIndex]?.label || progress?.currentPhase || 'Processing...';
+
   return (
     <div className="codemap-list-section">
       <div className="list-header">
@@ -71,17 +97,31 @@ export const CodemapList: React.FC<CodemapListProps> = ({
         </button>
       </div>
 
-      {/* Processing indicator */}
+      {/* Processing indicator with progress */}
       {isProcessing && (
-        <div className="codemap-item" style={{ opacity: 0.7 }}>
+        <div className="codemap-item processing-item">
           <div className="codemap-item-header">
             <span className="codemap-item-title">
               Generating...
               <span className="processing-badge">In Progress</span>
             </span>
           </div>
-          <div className="codemap-item-desc">
-            AI is analyzing your codebase and creating a new codemap.
+          
+          {/* Progress bar */}
+          <div className="progress-container">
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <span className="progress-text">{progressPercent}%</span>
+          </div>
+          
+          {/* Rotating status text */}
+          <div className="progress-status">
+            <span className="status-dot" />
+            <span className="status-text">{currentAgentLabel}</span>
           </div>
         </div>
       )}
@@ -103,7 +143,12 @@ export const CodemapList: React.FC<CodemapListProps> = ({
             onClick={() => onLoadHistory(item.id)}
           >
             <div className="codemap-item-header">
-              <span className="codemap-item-title">{item.codemap.title}</span>
+              <span className="codemap-item-title">
+                {item.isUnread && (
+                  <Circle size={8} className="unread-indicator" fill="currentColor" />
+                )}
+                {item.codemap.title}
+              </span>
               <div className="codemap-item-actions">
                 <button
                   className="icon-btn"

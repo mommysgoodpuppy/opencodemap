@@ -134,3 +134,11 @@ export function deleteCodemap(filename: string): boolean {
 export function getStoragePath(): string {
   return getCodemapStorageDir();
 }
+
+/**
+ * Get the full file path for a codemap by filename
+ */
+export function getCodemapFilePath(filename: string): string {
+  const storageDir = getCodemapStorageDir();
+  return path.join(storageDir, filename);
+}

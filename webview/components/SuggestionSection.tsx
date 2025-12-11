@@ -18,10 +18,6 @@ export const SuggestionSection: React.FC<SuggestionSectionProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
-  if (suggestions.length === 0) {
-    return null;
-  }
-
   return (
     <div className="suggestions-section">
       <div className="section-header">
@@ -43,18 +39,22 @@ export const SuggestionSection: React.FC<SuggestionSectionProps> = ({
       </div>
       {isExpanded && (
         <div>
-          {suggestions.map((suggestion) => (
-            <div
-              key={suggestion.id}
-              className="suggestion-item"
-              onClick={() => onSuggestionClick(suggestion)}
-            >
-              <div className="suggestion-text">{suggestion.text}</div>
-              {suggestion.sub && (
-                <div className="suggestion-sub">{suggestion.sub}</div>
-              )}
-            </div>
-          ))}
+          {suggestions.length === 0 ? (
+            <div className="suggestion-empty">No suggestions.</div>
+          ) : (
+            suggestions.map((suggestion) => (
+              <div
+                key={suggestion.id}
+                className="suggestion-item"
+                onClick={() => onSuggestionClick(suggestion)}
+              >
+                <div className="suggestion-text">{suggestion.text}</div>
+                {suggestion.sub && (
+                  <div className="suggestion-sub">{suggestion.sub}</div>
+                )}
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

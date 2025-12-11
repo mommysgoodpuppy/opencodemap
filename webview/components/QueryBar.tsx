@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 
 interface QueryBarProps {
   query: string;
@@ -11,6 +11,7 @@ interface QueryBarProps {
 
 /**
  * Query input bar with mode toggle and submit button.
+ * Textarea auto-resizes between 1-5 lines.
  */
 export const QueryBar: React.FC<QueryBarProps> = ({
   query,
@@ -20,6 +21,26 @@ export const QueryBar: React.FC<QueryBarProps> = ({
   onModeChange,
   onSubmit,
 }) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea between 1-5 lines
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = 'auto';
+    
+    // Calculate line height (approximately 20px per line)
+    const lineHeight = 20;
+    const minHeight = lineHeight; // 1 line
+    const maxHeight = lineHeight * 5; // 5 lines
+    
+    // Clamp between min and max
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
+    textarea.style.height = `${newHeight}px`;
+  }, [query]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !isProcessing && query.trim()) {
       e.preventDefault();
@@ -29,14 +50,15 @@ export const QueryBar: React.FC<QueryBarProps> = ({
 
   return (
     <div className="query-bar">
-      <input
-        type="text"
-        className="query-input"
+      <textarea
+        ref={textareaRef}
+        className="query-input query-textarea"
         placeholder="Enter a starting point for a new codemap (Ctrl+Shift+G)"
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={isProcessing}
+        rows={1}
       />
       <div className="query-controls">
         <div className="mode-toggle">

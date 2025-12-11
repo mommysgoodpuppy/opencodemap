@@ -31,6 +31,14 @@ interface TreeRow {
 }
 
 /**
+ * Clean up title text - remove extra tree chars that may appear in content
+ */
+function cleanTitle(text: string): string {
+  // Remove leading tree drawing chars that leaked into content
+  return text.replace(/^[└├│─\s]+/, '').trim();
+}
+
+/**
  * Parse a single line from traceTextDiagram
  */
 function parseDiagramLine(line: string): { level: number; title: string; link?: DiagramNode['link'] } {
@@ -50,46 +58,65 @@ function parseDiagramLine(line: string): { level: number; title: string; link?: 
         i++;
       }
     } else if (char === '├' || char === '└') {
-      i += 4;
+      // Skip tree branch chars (├── or └── or └─ etc)
+      while (i < line.length && (line[i] === '├' || line[i] === '└' || line[i] === '─' || line[i] === ' ')) {
+        i++;
+      }
       break;
     } else {
       break;
     }
   }
   
-  const content = line.substring(i).trim();
+  let content = line.substring(i).trim();
+  // Clean any remaining tree chars from start of content
+  content = cleanTitle(content);
+  
   const linkMatch = content.match(/^(.+?)\s*<--\s*(.+)$/);
   
   if (linkMatch) {
-    const title = linkMatch[1].trim();
+    const title = cleanTitle(linkMatch[1]);
     const linkStr = linkMatch[2].trim();
     
-    const locationMatch = linkStr.match(/^(\d+[a-z])$/);
+    // Location reference: "1a", "2b", etc
+    const locationMatch = linkStr.match(/^(\d+[a-z])$/i);
     if (locationMatch) {
       return {
         level,
         title,
-        link: { type: 'location', locationId: locationMatch[1] },
+        link: { type: 'location', locationId: locationMatch[1].toLowerCase() },
       };
     }
     
-    const fileMatch = linkStr.match(/^(.+?):(\d+)$/);
+    // File path with line number - use GREEDY match to handle Windows paths like e:\...:6
+    // Match everything up to the LAST colon followed by digits
+    const fileMatch = linkStr.match(/^(.+):(\d+)$/);
     if (fileMatch) {
+      let filePath = fileMatch[1].replace(/\\\\/g, '\\');
+      // Normalize forward slashes to backslashes on Windows paths
+      if (/^[a-zA-Z][:\\/]/.test(filePath)) {
+        filePath = filePath.replace(/\//g, '\\');
+      }
       return {
         level,
         title,
         link: {
           type: 'file',
-          filePath: fileMatch[1].replace(/\\\\/g, '\\'),
+          filePath,
           lineNumber: parseInt(fileMatch[2], 10),
         },
       };
     }
     
+    // Just a file path without line number
+    let filePath = linkStr.replace(/\\\\/g, '\\');
+    if (/^[a-zA-Z][:\\/]/.test(filePath)) {
+      filePath = filePath.replace(/\//g, '\\');
+    }
     return {
       level,
       title,
-      link: { type: 'file', filePath: linkStr.replace(/\\\\/g, '\\') },
+      link: { type: 'file', filePath },
     };
   }
   

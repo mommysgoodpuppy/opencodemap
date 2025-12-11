@@ -24,6 +24,7 @@ export interface Codemap {
   title: string;
   description: string;
   traces: CodemapTrace[];
+  mermaidDiagram?: string;
   savedAt?: string;
 }
 
@@ -42,6 +43,21 @@ export interface CodemapHistoryItem {
   id: string;
   codemap: Codemap;
   timestamp: number;
+  isUnread?: boolean;
+}
+
+/** Progress state for codemap generation */
+export interface ProgressState {
+  totalStages: number;
+  completedStages: number;
+  activeAgents: ActiveAgent[];
+  currentPhase: string;
+}
+
+export interface ActiveAgent {
+  id: string;
+  label: string;
+  startTime: number;
 }
 
 // Messages from Webview to Extension
@@ -52,7 +68,8 @@ export type WebviewToExtensionMessage =
   | { command: 'refreshHistory' }
   | { command: 'deleteHistory'; filename: string }
   | { command: 'loadHistory'; filename: string }
-  | { command: 'refreshSuggestions' };
+  | { command: 'refreshSuggestions' }
+  | { command: 'openJson' };
 
 // Messages from Extension to Webview
 export type ExtensionToWebviewMessage =
@@ -64,6 +81,7 @@ export type ExtensionToWebviewMessage =
       mode: 'fast' | 'smart';
       suggestions: CodemapSuggestion[];
       history: CodemapHistoryItem[];
+      progress?: ProgressState;
     }
   | { type: 'setQuery'; query: string }
   | { type: 'navigate'; page: 'home' | 'detail' };

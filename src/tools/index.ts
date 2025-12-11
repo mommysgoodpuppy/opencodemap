@@ -288,38 +288,6 @@ export const findByNameTool = tool({
 });
 
 /**
- * create_code_map tool - creates or updates the codemap
- */
-export const createCodeMapTool = tool({
-  description: `Create a codemap for the current task. The codemap should document control flow and data flow, organized into traces.`,
-  parameters: z.object({
-    codeMap: z.object({
-      title: z.string(),
-      description: z.string(),
-      traces: z.array(z.object({
-        id: z.string(),
-        title: z.string(),
-        description: z.string(),
-        locations: z.array(z.object({
-          id: z.string(),
-          path: z.string(),
-          lineNumber: z.number(),
-          lineContent: z.string(),
-          title: z.string(),
-          description: z.string(),
-        })),
-        traceTextDiagram: z.string().optional(),
-      })),
-    }),
-  }),
-  execute: async ({ codeMap }) => {
-    // This tool's result is handled specially by the agent
-    // to update the codemap state
-    return JSON.stringify(codeMap, null, 2);
-  },
-});
-
-/**
  * Get all available tools as an object
  */
 export const allTools = {
@@ -327,5 +295,4 @@ export const allTools = {
   list_dir: listDirTool,
   grep_search: grepSearchTool,
   find_by_name: findByNameTool,
-  create_code_map: createCodeMapTool,
 };

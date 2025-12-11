@@ -3,9 +3,15 @@
  */
 
 import { generateText } from 'ai';
-import { getOpenAIClient, getModelName, isConfigured } from './baseClient';
+import { getOpenAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt } from '../prompts';
 import type { CodemapSuggestion } from '../types';
+
+interface SuggestionResponse {
+  title: string;
+  subtitle: string;
+  starting_points: string[];
+}
 
 export async function generateSuggestions(
   recentFiles: string[]
@@ -19,16 +25,15 @@ export async function generateSuggestions(
     return [];
   }
 
-  // Load prompts from template files
-  const systemPrompt = loadPrompt('suggestion', 'system');
+  // Load user prompt with recent files - no system prompt for this agent
   const userPrompt = loadPrompt('suggestion', 'user', {
     recent_files: recentFiles.map((f, i) => `${i + 1}. ${f}`).join('\n'),
+    language: getLanguage(),
   });
 
   try {
     const result = await generateText({
       model: client(getModelName()),
-      system: systemPrompt,
       prompt: userPrompt,
       maxTokens: 500,
     });
@@ -36,10 +41,13 @@ export async function generateSuggestions(
     // Parse JSON from response
     const jsonMatch = result.text.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      const suggestions = JSON.parse(jsonMatch[0]) as Array<{ id?: string; text: string }>;
-      return suggestions.map((s, i) => ({
-        id: s.id || `suggestion-${i}`,
-        text: s.text,
+      const suggestions = JSON.parse(jsonMatch[0]) as SuggestionResponse[];
+      // Take at most 3 suggestions
+      return suggestions.slice(0, 3).map((s, i) => ({
+        id: `suggestion-${i}`,
+        text: s.title,
+        sub: s.subtitle,
+        startingPoints: s.starting_points,
         timestamp: Date.now(),
       }));
     }

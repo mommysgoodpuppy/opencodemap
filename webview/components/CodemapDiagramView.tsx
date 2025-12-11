@@ -4,6 +4,21 @@ import type { Codemap, CodemapTrace, CodemapLocation } from '../types';
 
 interface CodemapDiagramViewProps {
   codemap: Codemap | null;
+  onLocationClick?: (location: CodemapLocation) => void;
+}
+
+/**
+ * Build a map from step label (e.g., "1a", "2b") to CodemapLocation
+ */
+function buildLocationMap(codemap: Codemap): Map<string, CodemapLocation> {
+  const map = new Map<string, CodemapLocation>();
+  codemap.traces.forEach((trace, traceIdx) => {
+    trace.locations.forEach((loc, locIdx) => {
+      const stepLabel = `${traceIdx + 1}${String.fromCharCode(97 + locIdx)}`;
+      map.set(stepLabel, loc);
+    });
+  });
+  return map;
 }
 
 /**
@@ -141,13 +156,29 @@ function parseTraceReferences(text: string): number[] {
  */
 export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
   codemap,
+  onLocationClick,
 }) => {
   const mermaidCode = useMemo(() => {
     if (!codemap || codemap.traces.length === 0) {
       return '';
     }
+    if (codemap.mermaidDiagram && codemap.mermaidDiagram.trim().length > 0) {
+      return codemap.mermaidDiagram.trim();
+    }
     return buildMermaidFromCodemap(codemap);
   }, [codemap]);
+
+  const locationMap = useMemo(() => {
+    if (!codemap) return new Map<string, CodemapLocation>();
+    return buildLocationMap(codemap);
+  }, [codemap]);
+
+  const handleNodeClick = (stepLabel: string) => {
+    const location = locationMap.get(stepLabel);
+    if (location && onLocationClick) {
+      onLocationClick(location);
+    }
+  };
 
   if (!codemap) {
     return (
@@ -173,7 +204,7 @@ export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
 
   return (
     <div className="diagram-container">
-      <MermaidDiagram code={mermaidCode} id="codemap-diagram" />
+      <MermaidDiagram code={mermaidCode} id="codemap-diagram" onNodeClick={handleNodeClick} />
     </div>
   );
 };

@@ -24,11 +24,14 @@ export interface Codemap {
   title: string;
   description: string;
   traces: CodemapTrace[];
+  mermaidDiagram?: string;
 }
 
 export interface CodemapSuggestion {
   id: string;
   text: string;
+  sub?: string;
+  startingPoints?: string[];
   timestamp: number;
 }
 

@@ -13,8 +13,8 @@
  */
 
 import { generateText, CoreMessage } from 'ai';
-import { getOpenAIClient, getModelName, isConfigured } from './baseClient';
-import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon } from '../prompts';
+import { getOpenAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
+import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon, loadMermaidPrompt } from '../prompts';
 import { allTools } from '../tools';
 import type { Codemap } from '../types';
 import {
@@ -22,6 +22,7 @@ import {
   extractCodemapFromResponse,
   extractTraceDiagram,
   extractTraceGuide,
+  extractMermaidDiagram,
   isResearchComplete,
   formatCurrentDate,
   getUserOs,
@@ -48,6 +49,11 @@ interface TraceProcessingResult {
   error?: string;
 }
 
+interface MermaidProcessingResult {
+  diagram?: string;
+  error?: string;
+}
+
 /**
  * Process a single trace through stages 3-5
  */
@@ -56,6 +62,7 @@ async function processTraceStages(
   systemPrompt: string,
   baseMessages: CoreMessage[],
   currentDate: string,
+  language: string,
   callbacks: CodemapCallbacks = {}
 ): Promise<TraceProcessingResult> {
   logger.info(`[Trace ${traceId}] Starting trace processing (stages 3-5)`);
@@ -74,7 +81,7 @@ async function processTraceStages(
     // Stage 3: Generate trace text diagram
     logger.info(`[Trace ${traceId}] Stage 3: Starting - Generate trace text diagram`);
     callbacks.onTraceProcessing?.(traceId, 3, 'start');
-    const stage3Prompt = loadTraceStagePrompt(3, traceId, { current_date: currentDate });
+    const stage3Prompt = loadTraceStagePrompt(3, traceId, { current_date: currentDate, language });
     logger.debug(`[Trace ${traceId}] Stage 3 prompt length: ${stage3Prompt.length}`);
     messages.push({ role: 'user', content: stage3Prompt });
 
@@ -98,7 +105,7 @@ async function processTraceStages(
     // Stage 4: Add location decorations to diagram
     logger.info(`[Trace ${traceId}] Stage 4: Starting - Add location decorations`);
     callbacks.onTraceProcessing?.(traceId, 4, 'start');
-    const stage4Prompt = loadTraceStagePrompt(4, traceId, { current_date: currentDate });
+    const stage4Prompt = loadTraceStagePrompt(4, traceId, { current_date: currentDate, language });
     messages.push({ role: 'user', content: stage4Prompt });
 
     logger.info(`[Trace ${traceId}] Stage 4: Calling API...`);
@@ -126,7 +133,7 @@ async function processTraceStages(
     // Stage 5: Generate trace guide
     logger.info(`[Trace ${traceId}] Stage 5: Starting - Generate trace guide`);
     callbacks.onTraceProcessing?.(traceId, 5, 'start');
-    const stage5Prompt = loadTraceStagePrompt(5, traceId, { current_date: currentDate });
+    const stage5Prompt = loadTraceStagePrompt(5, traceId, { current_date: currentDate, language });
     messages.push({ role: 'user', content: stage5Prompt });
 
     logger.info(`[Trace ${traceId}] Stage 5: Calling API...`);
@@ -160,6 +167,60 @@ async function processTraceStages(
       logger.error(`[Trace ${traceId}] Stack trace: ${errorStack}`);
     }
     return { traceId, error: errorMsg };
+  }
+}
+
+/**
+ * Generate a global mermaid diagram using the mermaid prompt
+ */
+async function processMermaidDiagram(
+  systemPrompt: string,
+  baseMessages: CoreMessage[],
+  currentDate: string,
+  language: string,
+  callbacks: CodemapCallbacks = {}
+): Promise<MermaidProcessingResult> {
+  logger.info('[Mermaid] Starting mermaid diagram generation');
+
+  const client = getOpenAIClient();
+  if (!client) {
+    logger.error('[Mermaid] Failed to create OpenAI client');
+    return { error: 'Failed to create OpenAI client' };
+  }
+
+  const messages: CoreMessage[] = [...baseMessages];
+
+  try {
+    callbacks.onPhaseChange?.('Mermaid Diagram', 6);
+    const mermaidPrompt = loadMermaidPrompt({ current_date: currentDate, language });
+    logger.debug(`[Mermaid] Prompt length: ${mermaidPrompt.length}`);
+    messages.push({ role: 'user', content: mermaidPrompt });
+    callbacks.onMessage?.('user', '[Mermaid] Generating global mermaid diagram...');
+
+    logger.info('[Mermaid] Calling API...');
+    const mermaidResult = await generateText({
+      model: client(getModelName()),
+      system: systemPrompt,
+      messages,
+    });
+    logger.info(`[Mermaid] API response received, text length: ${mermaidResult.text?.length || 0}`);
+
+    if (!mermaidResult.text) {
+      logger.warn('[Mermaid] No text in response');
+      return { error: 'No text in mermaid response' };
+    }
+
+    const diagram = extractMermaidDiagram(mermaidResult.text) || undefined;
+    callbacks.onMessage?.('assistant', '[Mermaid] Mermaid diagram generated');
+    logger.info(`[Mermaid] Diagram extracted: ${diagram ? 'YES' : 'NO'}`);
+    if (diagram) {
+      logger.debug(`[Mermaid] Diagram length: ${diagram.length}`);
+    }
+    return { diagram };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[Mermaid] Error during mermaid generation: ${errorMsg}`);
+    return { error: errorMsg };
   }
 }
 
@@ -214,17 +275,20 @@ export async function generateCodemap(
 
   // Build system prompt based on mode
   logger.info('Building system prompt...');
+  const language = getLanguage();
   const systemPrompt = buildSystemPrompt(mode, {
     workspace_root: workspaceRoot,
     workspace_layout: workspaceLayout,
     workspace_uri: workspaceUri,
     corpus_name: corpusName,
     user_os: getUserOs(),
+    language,
   });
   logger.debug(`System prompt length: ${systemPrompt.length}`);
 
   const messages: CoreMessage[] = [];
   let resultCodemap: Codemap | null = null;
+  let mermaidPromise: Promise<MermaidProcessingResult | null> | null = null;
   
   callbacks.onMessage?.('system', `Starting ${mode} codemap generation...`);
 
@@ -235,6 +299,7 @@ export async function generateCodemap(
     const stage1Prompt = loadStagePrompt(1, {
       query,
       current_date: currentDate,
+      language,
     });
     logger.debug(`Stage 1 prompt length: ${stage1Prompt.length}`);
     
@@ -317,6 +382,7 @@ export async function generateCodemap(
     const stage2Prompt = loadStagePrompt(2, {
       query,
       current_date: currentDate,
+      language,
     });
     logger.debug(`Stage 2 prompt length: ${stage2Prompt.length}`);
     
@@ -347,6 +413,13 @@ export async function generateCodemap(
         }
         callbacks.onCodemapUpdate?.(resultCodemap);
         callbacks.onMessage?.('system', `Codemap structure generated with ${resultCodemap.traces.length} traces`);
+        mermaidPromise = processMermaidDiagram(
+          systemPrompt,
+          messages,
+          currentDate,
+          language,
+          callbacks
+        );
       } else {
         logger.error('Stage 2 - FAILED to extract codemap from response!');
         logger.error(`Stage 2 - Response preview: ${stage2Result.text.slice(0, 500)}...`);
@@ -368,12 +441,17 @@ export async function generateCodemap(
           systemPrompt,
           messages,
           currentDate,
+          language,
           callbacks
         )
       );
 
       logger.info('Waiting for all trace processing to complete...');
-      const traceResults = await Promise.all(tracePromises);
+      const mermaidRunner = mermaidPromise ?? Promise.resolve<MermaidProcessingResult | null>(null);
+      const [traceResults, mermaidResult] = await Promise.all([
+        Promise.all(tracePromises),
+        mermaidRunner,
+      ]);
       logger.info(`All ${traceResults.length} traces processed`);
 
       let successCount = 0;
@@ -401,12 +479,36 @@ export async function generateCodemap(
       }
       
       logger.info(`Trace processing complete: ${successCount} success, ${errorCount} errors`);
+
+      if (mermaidResult) {
+        if (mermaidResult.error) {
+          logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
+          callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
+        } else if (mermaidResult.diagram) {
+          resultCodemap.mermaidDiagram = mermaidResult.diagram;
+          logger.info(`[Mermaid] Diagram stored (${mermaidResult.diagram.length} chars)`);
+          callbacks.onMessage?.('assistant', '[Mermaid] Diagram saved to codemap');
+        }
+      }
+
       callbacks.onCodemapUpdate?.(resultCodemap);
     } else {
       if (!resultCodemap) {
         logger.warn('No codemap was generated - skipping trace processing');
       } else {
         logger.warn('Codemap has no traces - skipping trace processing');
+        if (mermaidPromise) {
+          const mermaidResult = await mermaidPromise;
+          if (mermaidResult?.diagram) {
+            resultCodemap.mermaidDiagram = mermaidResult.diagram;
+            logger.info(`[Mermaid] Diagram stored (${mermaidResult.diagram.length} chars)`);
+            callbacks.onMessage?.('assistant', '[Mermaid] Diagram saved to codemap');
+            callbacks.onCodemapUpdate?.(resultCodemap);
+          } else if (mermaidResult?.error) {
+            logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
+            callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
+          }
+        }
       }
     }
 

@@ -109,6 +109,22 @@ export function extractTraceGuide(text: string): string | null {
 }
 
 /**
+ * Extract mermaid diagram code block from response
+ */
+export function extractMermaidDiagram(text: string): string | null {
+  const mermaidMatch = text.match(/```mermaid\s*([\s\S]*?)\s*```/i);
+  if (mermaidMatch) {
+    return mermaidMatch[1].trim();
+  }
+  const codeBlockMatch = text.match(/```[\s\S]*?```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[0].replace(/```/g, '').trim();
+  }
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * Check if the model indicates research is complete
  */
 export function isResearchComplete(text: string): boolean {
@@ -145,4 +161,6 @@ export function formatCurrentDate(): string {
 export function getUserOs(): string {
   return process.platform === 'win32' ? 'windows' : process.platform;
 }
+
+
 

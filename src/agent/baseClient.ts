@@ -38,6 +38,11 @@ export function getModelName(): string {
   return config.get<string>('model') || 'gpt-4o';
 }
 
+export function getLanguage(): string {
+  const config = vscode.workspace.getConfiguration('codemap');
+  return config.get<string>('language') || 'English';
+}
+
 export function isConfigured(): boolean {
   return getOpenAIClient() !== null;
 }

@@ -25,7 +25,7 @@
       },
       {
         "command": "codemap.setApiKey",
-        "title": "Codemap: Set OpenAI API Key"
+        "title": "Codemap: Set OpenAI API4 Key"
       },
       {
         "command": "codemap.showStoragePath",
@@ -85,6 +85,23 @@
           "type": "string",
           "default": "gpt-4o",
           "description": "Model to use for Codemap generation"
+        },
+        "codemap.language": {
+          "type": "string",
+          "default": "English",
+          "enum": [
+            "English",
+            "简体中文",
+            "繁體中文",
+            "日本語",
+            "한국어",
+            "Français",
+            "Deutsch",
+            "Español",
+            "Português",
+            "Русский"
+          ],
+          "description": "Language for AI responses and generated content"
         }
       }
     }
@@ -108,6 +125,7 @@
     "ai": "^4.0.0",
     "lucide-react": "^0.511.0",
     "mermaid": "^11.12.2",
+    "svg-pan-zoom": "^3.6.1",
     "react": "^19.2.1",
     "react-arborist": "^3.4.3",
     "react-dom": "^19.2.1",

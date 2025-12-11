@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { GitFork, LayoutDashboard, Info } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { GitFork, LayoutDashboard, Info, FileJson } from 'lucide-react';
 import { QueryBar } from './QueryBar';
 import { SuggestionSection } from './SuggestionSection';
 import { CodemapList } from './CodemapList';
-import { CodemapTreeView } from './CodemapTreeView';
+import { CodemapTreeView, renderInlineMarkdown } from './CodemapTreeView';
 import { CodemapDiagramView } from './CodemapDiagramView';
 import type {
   Codemap,
@@ -13,6 +13,7 @@ import type {
   WebviewToExtensionMessage,
   ExtensionToWebviewMessage,
   VsCodeApi,
+  ProgressState,
 } from '../types';
 
 // Acquire VS Code API once
@@ -33,6 +34,7 @@ interface AppState {
   history: CodemapHistoryItem[];
   activeView: 'tree' | 'diagram';
   page: 'home' | 'detail';
+  progress?: ProgressState;
 }
 
 /**
@@ -72,7 +74,8 @@ export const App: React.FC = () => {
       switch (message.type) {
         case 'update':
           setState((prev) => {
-            const hasCodemap = !!message.codemap;
+            // Don't auto-navigate to detail page when codemap is generated
+            // User needs to manually click to view it
             const shouldReturnHome =
               !message.codemap &&
               !message.isProcessing &&
@@ -85,8 +88,9 @@ export const App: React.FC = () => {
               mode: message.mode,
               suggestions: message.suggestions,
               history: message.history,
-              // Note: We ignore message.messages as per requirement
-              page: hasCodemap ? 'detail' : shouldReturnHome ? 'home' : prev.page,
+              progress: message.progress,
+              // Stay on current page, only go home if detail page has no codemap
+              page: shouldReturnHome ? 'home' : prev.page,
             };
           });
           break;
@@ -167,6 +171,23 @@ export const App: React.FC = () => {
     setState((prev) => ({ ...prev, activeView: view }));
   }, []);
 
+  const handleOpenJson = useCallback(() => {
+    vscode.postMessage({ command: 'openJson' });
+  }, []);
+
+  // Build location map for description links
+  const allLocations = useMemo(() => {
+    const map = new Map<string, CodemapLocation>();
+    if (state.codemap) {
+      for (const trace of state.codemap.traces) {
+        for (const loc of trace.locations) {
+          map.set(loc.id, loc);
+        }
+      }
+    }
+    return map;
+  }, [state.codemap]);
+
   // Home page: query + suggestions + codemap list
   if (state.page === 'home') {
     return (
@@ -190,6 +211,7 @@ export const App: React.FC = () => {
           currentCodemap={state.codemap}
           history={state.history}
           isProcessing={state.isProcessing}
+          progress={state.progress}
           onLoadHistory={handleLoadHistory}
           onDeleteHistory={handleDeleteHistory}
           onRefresh={handleRefreshHistory}
@@ -201,46 +223,66 @@ export const App: React.FC = () => {
   // Detail page: tree/diagram views (back in VS Code view title bar)
   return (
     <div className="app-container">
-      {/* Floating header with title, meta and description (like reference screenshot) */}
+      {/* Header with title, meta, tabs and description */}
       <div className="detail-header">
-        <div className="view-header detail-header-main">
-          <div className="detail-title-block">
-            <div className="detail-title">{state.codemap?.title || 'Codemap'}</div>
-            {state.codemap?.savedAt && (
-              <div className="detail-meta">
-                <span className="detail-meta-icon">
-                  <Info size={12} />
-                </span>
-                <span>
-                  Created {new Date(state.codemap.savedAt).toLocaleString()}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="view-tabs">
-            <button
-              className={`view-tab ${state.activeView === 'tree' ? 'active' : ''}`}
-              onClick={() => handleViewChange('tree')}
-            >
-              <GitFork size={14} />
-              Tree View
-            </button>
-            <button
-              className={`view-tab ${state.activeView === 'diagram' ? 'active' : ''}`}
-              onClick={() => handleViewChange('diagram')}
-            >
-              <LayoutDashboard size={14} />
-              Diagram
-            </button>
-          </div>
-        </div>
-
-        {state.codemap && (
-          <div className="detail-description">
-            {state.codemap.description}
+        {/* Title row */}
+        <div className="detail-title">{state.codemap?.title || 'Codemap'}</div>
+        
+        {/* Meta row */}
+        {state.codemap?.savedAt && (
+          <div className="detail-meta">
+            <Info size={12} />
+            <span>Created {new Date(state.codemap.savedAt).toLocaleString()}</span>
           </div>
         )}
+        
+        {/* Description with clickable location refs */}
+        {state.codemap && state.codemap.description && (
+          <div className="detail-description">
+            {renderInlineMarkdown(state.codemap.description, {
+              onOpenFile: (filePath, lineNumber) => {
+                handleLocationClick({
+                  id: `file-${filePath}`,
+                  path: filePath,
+                  lineNumber: lineNumber || 1,
+                  lineContent: '',
+                  title: filePath.split(/[/\\]/).pop() || filePath,
+                  description: '',
+                });
+              },
+              onOpenLocationRef: (locationId) => {
+                const loc = allLocations.get(locationId);
+                if (loc) handleLocationClick(loc);
+              },
+            })}
+          </div>
+        )}
+        
+        {/* View tabs row */}
+        <div className="view-tabs">
+          <button
+            className={`view-tab ${state.activeView === 'tree' ? 'active' : ''}`}
+            onClick={() => handleViewChange('tree')}
+          >
+            <GitFork size={14} />
+            Tree View
+          </button>
+          <button
+            className={`view-tab ${state.activeView === 'diagram' ? 'active' : ''}`}
+            onClick={() => handleViewChange('diagram')}
+          >
+            <LayoutDashboard size={14} />
+            Diagram
+          </button>
+          <button
+            className="view-tab"
+            onClick={handleOpenJson}
+            title="Open JSON file"
+          >
+            <FileJson size={14} />
+            JSON
+          </button>
+        </div>
       </div>
 
       <div className="scroll-container custom-scrollbar">
@@ -250,7 +292,7 @@ export const App: React.FC = () => {
             onLocationClick={handleLocationClick}
           />
         ) : (
-          <CodemapDiagramView codemap={state.codemap} />
+          <CodemapDiagramView codemap={state.codemap} onLocationClick={handleLocationClick} />
         )}
       </div>
     </div>
