@@ -49,7 +49,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.7)
       '@types/vscode':
-        specifier: ^1.106.1
+        specifier: ^1.98.0
         version: 1.106.1
       '@vscode/test-cli':
         specifier: ^0.0.12
