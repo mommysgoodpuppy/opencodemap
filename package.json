@@ -1,5 +1,6 @@
 {
   "name": "codemap",
+  "publisher": "cometix",
   "displayName": "Codemap Explorer",
   "description": "AI-powered code exploration and visualization with dual-view rendering",
   "version": "0.0.1",

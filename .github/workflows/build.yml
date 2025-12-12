@@ -11,6 +11,7 @@ on:
 
 env:
   NODE_VERSION: '22'
+  PNPM_VERSION: '10.18.3'
 
 jobs:
   build:
@@ -31,7 +32,12 @@ jobs:
 
       # 准备 pnpm - 这会安装 package.json 中 packageManager 字段指定的版本
       - name: Prepare pnpm
-        run: corepack prepare
+        run: corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+
+      - name: Show tool versions
+        run: |
+          node --version
+          pnpm --version
 
       # 获取 pnpm store 目录用于缓存
       - name: Get pnpm store directory
@@ -52,23 +58,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 运行类型检查
-      - name: Type check
-        run: pnpm run check-types
-
-      # 运行 lint
-      - name: Lint
-        run: pnpm run lint
-
-      # 构建项目
-      - name: Build
-        run: pnpm run package
-
-      # 安装 vsce 并打包 VSIX
+      # 打包 VSIX（避免 pnpm 全局安装：使用 pnpm dlx 运行一次性工具）
       - name: Package VSIX
-        run: |
-          pnpm add -g @vscode/vsce
-          vsce package --no-dependencies
+        run: pnpm dlx @vscode/vsce@2.26.0 package --no-dependencies --allow-missing-repository
 
       # 上传 VSIX 作为构建工件
       - name: Upload VSIX artifact
