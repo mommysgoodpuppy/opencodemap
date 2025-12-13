@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Trash2, RefreshCw, Circle } from 'lucide-react';
+import { Trash2, RefreshCw, Circle } from 'lucide-react';
 import type { Codemap, CodemapHistoryItem, ProgressState } from '../types';
 
 interface CodemapListProps {
@@ -10,6 +10,7 @@ interface CodemapListProps {
   onLoadHistory: (id: string) => void;
   onDeleteHistory: (id: string) => void;
   onRefresh: () => void;
+  onRegenerateFromScratch: (item: CodemapHistoryItem) => void;
 }
 
 /**
@@ -24,6 +25,7 @@ export const CodemapList: React.FC<CodemapListProps> = ({
   onLoadHistory,
   onDeleteHistory,
   onRefresh,
+  onRegenerateFromScratch,
 }) => {
   const [searchText, setSearchText] = useState('');
   const [activeAgentIndex, setActiveAgentIndex] = useState(0);
@@ -150,6 +152,17 @@ export const CodemapList: React.FC<CodemapListProps> = ({
                 {item.codemap.title}
               </span>
               <div className="codemap-item-actions">
+                <button
+                  className="icon-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRegenerateFromScratch(item);
+                  }}
+                  title="Regenerate from scratch (fill query)"
+                  disabled={isProcessing}
+                >
+                  <RefreshCw size={14} />
+                </button>
                 <button
                   className="icon-btn"
                   onClick={(e) => {

@@ -20,12 +20,32 @@ export interface CodemapTrace {
   traceGuide?: string;
 }
 
+export interface CodemapStage12ContextV1 {
+  schemaVersion: 1;
+  createdAt: string;
+  query: string;
+  mode: 'fast' | 'smart';
+  workspaceRoot: string;
+  currentDate: string;
+  language: string;
+  systemPrompt: string;
+  baseMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+
 export interface Codemap {
   title: string;
   description: string;
   traces: CodemapTrace[];
   mermaidDiagram?: string;
   savedAt?: string;
+  // Optional metadata persisted by extension storage (backwards compatible)
+  updatedAt?: string;
+  workspacePath?: string;
+  query?: string;
+  mode?: 'fast' | 'smart';
+  schemaVersion?: number;
+  // Persisted Stage 1-2 shared context for retries
+  stage12Context?: CodemapStage12ContextV1;
 }
 
 export interface AgentMessage {
@@ -69,7 +89,11 @@ export type WebviewToExtensionMessage =
   | { command: 'deleteHistory'; filename: string }
   | { command: 'loadHistory'; filename: string }
   | { command: 'refreshSuggestions' }
-  | { command: 'openJson' };
+  | { command: 'openJson' }
+  | { command: 'ensureMermaidDiagram' }
+  | { command: 'retryTrace'; traceId: string }
+  | { command: 'retryAllTraces' }
+  | { command: 'regenerateMermaidDiagram' };
 
 // Messages from Extension to Webview
 export type ExtensionToWebviewMessage =

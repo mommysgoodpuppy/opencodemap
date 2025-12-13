@@ -1,29 +1,19 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { GitFork, LayoutDashboard, Info, FileJson } from 'lucide-react';
+import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw } from 'lucide-react';
 import { QueryBar } from './QueryBar';
 import { SuggestionSection } from './SuggestionSection';
 import { CodemapList } from './CodemapList';
 import { CodemapTreeView, renderInlineMarkdown } from './CodemapTreeView';
 import { CodemapDiagramView } from './CodemapDiagramView';
+import { useExtensionCommands, useVsCodeApi } from '../extensionBridge';
 import type {
   Codemap,
   CodemapSuggestion,
   CodemapHistoryItem,
   CodemapLocation,
-  WebviewToExtensionMessage,
   ExtensionToWebviewMessage,
-  VsCodeApi,
   ProgressState,
 } from '../types';
-
-// Acquire VS Code API once
-const vscode: VsCodeApi = (window as any).acquireVsCodeApi
-  ? (window as any).acquireVsCodeApi()
-  : {
-      postMessage: (msg: WebviewToExtensionMessage) => console.log('postMessage:', msg),
-      getState: () => null,
-      setState: () => {},
-    };
 
 interface AppState {
   query: string;
@@ -41,9 +31,12 @@ interface AppState {
  * Main application component for Codemap webview.
  */
 export const App: React.FC = () => {
+  const api = useVsCodeApi();
+  const commands = useExtensionCommands();
+
   const [state, setState] = useState<AppState>(() => {
     // Try to restore state from VS Code
-    const saved = vscode.getState() as Partial<AppState> | null;
+    const saved = api.getState() as Partial<AppState> | null;
     return {
       query: saved?.query || '',
       mode: saved?.mode || 'smart',
@@ -58,13 +51,13 @@ export const App: React.FC = () => {
 
   // Persist state changes
   useEffect(() => {
-    vscode.setState({
+    api.setState({
       query: state.query,
       mode: state.mode,
       activeView: state.activeView,
       page: state.page,
     });
-  }, [state.query, state.mode, state.activeView, state.page]);
+  }, [api, state.query, state.mode, state.activeView, state.page]);
 
   // Handle messages from extension
   useEffect(() => {
@@ -114,10 +107,10 @@ export const App: React.FC = () => {
     window.addEventListener('message', handleMessage);
     
     // Signal that webview is ready
-    vscode.postMessage({ command: 'ready' });
+    commands.ready();
     
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [commands]);
 
   // Handlers
   const handleQueryChange = useCallback((query: string) => {
@@ -130,13 +123,9 @@ export const App: React.FC = () => {
 
   const handleSubmit = useCallback(() => {
     if (state.query.trim() && !state.isProcessing) {
-      vscode.postMessage({
-        command: 'submit',
-        query: state.query.trim(),
-        mode: state.mode,
-      });
+      commands.submit(state.query.trim(), state.mode);
     }
-  }, [state.query, state.mode, state.isProcessing]);
+  }, [commands, state.query, state.mode, state.isProcessing]);
 
   const handleSuggestionClick = useCallback((suggestion: CodemapSuggestion) => {
     // Only fill query, don't auto-submit
@@ -144,36 +133,59 @@ export const App: React.FC = () => {
   }, []);
 
   const handleRefreshSuggestions = useCallback(() => {
-    vscode.postMessage({ command: 'refreshSuggestions' });
-  }, []);
+    commands.refreshSuggestions();
+  }, [commands]);
 
   const handleLoadHistory = useCallback((id: string) => {
-    vscode.postMessage({ command: 'loadHistory', filename: id });
-  }, []);
+    commands.loadHistory(id);
+  }, [commands]);
 
   const handleDeleteHistory = useCallback((id: string) => {
-    vscode.postMessage({ command: 'deleteHistory', filename: id });
-  }, []);
+    commands.deleteHistory(id);
+  }, [commands]);
 
   const handleRefreshHistory = useCallback(() => {
-    vscode.postMessage({ command: 'refreshHistory' });
-  }, []);
+    commands.refreshHistory();
+  }, [commands]);
 
   const handleLocationClick = useCallback((location: CodemapLocation) => {
-    vscode.postMessage({
-      command: 'openFile',
-      path: location.path,
-      line: location.lineNumber,
-    });
-  }, []);
+    commands.openFile(location.path, location.lineNumber);
+  }, [commands]);
 
   const handleViewChange = useCallback((view: 'tree' | 'diagram') => {
     setState((prev) => ({ ...prev, activeView: view }));
   }, []);
 
   const handleOpenJson = useCallback(() => {
-    vscode.postMessage({ command: 'openJson' });
-  }, []);
+    commands.openJson();
+  }, [commands]);
+
+  const handleRetryTrace = useCallback((traceId: string) => {
+    if (state.isProcessing) return;
+    commands.retryTrace(traceId);
+  }, [commands, state.isProcessing]);
+
+  const handleRetryAllTraces = useCallback(() => {
+    if (state.isProcessing) return;
+    commands.retryAllTraces();
+  }, [commands, state.isProcessing]);
+
+  const handleRegenerateMermaidDiagram = useCallback(() => {
+    if (state.isProcessing) return;
+    commands.regenerateMermaidDiagram();
+  }, [commands, state.isProcessing]);
+
+  const handleRegenerateFromScratch = useCallback((item: CodemapHistoryItem) => {
+    const query =
+      item.codemap.query ||
+      item.codemap.stage12Context?.query ||
+      '';
+    const mode =
+      item.codemap.mode ||
+      item.codemap.stage12Context?.mode ||
+      state.mode;
+    setState((prev) => ({ ...prev, query, mode }));
+  }, [state.mode]);
 
   // Build location map for description links
   const allLocations = useMemo(() => {
@@ -215,6 +227,7 @@ export const App: React.FC = () => {
           onLoadHistory={handleLoadHistory}
           onDeleteHistory={handleDeleteHistory}
           onRefresh={handleRefreshHistory}
+          onRegenerateFromScratch={handleRegenerateFromScratch}
         />
       </div>
     );
@@ -268,11 +281,27 @@ export const App: React.FC = () => {
             Tree View
           </button>
           <button
+            className="icon-btn"
+            onClick={handleRetryAllTraces}
+            title="Retry all traces"
+            disabled={state.isProcessing || !state.codemap?.stage12Context}
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button
             className={`view-tab ${state.activeView === 'diagram' ? 'active' : ''}`}
             onClick={() => handleViewChange('diagram')}
           >
             <LayoutDashboard size={14} />
             Diagram
+          </button>
+          <button
+            className="icon-btn"
+            onClick={handleRegenerateMermaidDiagram}
+            title="Regenerate Mermaid diagram"
+            disabled={state.isProcessing || !state.codemap}
+          >
+            <RefreshCw size={14} />
           </button>
           <button
             className="view-tab"
@@ -290,6 +319,9 @@ export const App: React.FC = () => {
           <CodemapTreeView
             codemap={state.codemap}
             onLocationClick={handleLocationClick}
+            isProcessing={state.isProcessing}
+            canRetryTraces={Boolean(state.codemap?.stage12Context)}
+            onRetryTrace={handleRetryTrace}
           />
         ) : (
           <CodemapDiagramView codemap={state.codemap} onLocationClick={handleLocationClick} />

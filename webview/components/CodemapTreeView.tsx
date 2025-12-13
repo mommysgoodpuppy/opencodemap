@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
 import { TraceDiagramView } from './TraceDiagramView';
 import type { Codemap, CodemapLocation, CodemapTrace } from '../types';
 
 interface CodemapTreeViewProps {
   codemap: Codemap | null;
   onLocationClick: (location: CodemapLocation) => void;
+  isProcessing?: boolean;
+  canRetryTraces?: boolean;
+  onRetryTrace?: (traceId: string) => void;
 }
 
 /**
@@ -247,6 +250,9 @@ interface TraceSectionProps {
   allLocations: Map<string, CodemapLocation>;
   onLocationClick: (location: CodemapLocation) => void;
   onFileClick: (filePath: string, lineNumber?: number) => void;
+  isProcessing?: boolean;
+  canRetryTraces?: boolean;
+  onRetryTrace?: (traceId: string) => void;
 }
 
 /**
@@ -259,6 +265,9 @@ const TraceSection: React.FC<TraceSectionProps> = ({
   allLocations,
   onLocationClick,
   onFileClick,
+  isProcessing,
+  canRetryTraces,
+  onRetryTrace,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [isGuideExpanded, setIsGuideExpanded] = useState(false);
@@ -276,6 +285,21 @@ const TraceSection: React.FC<TraceSectionProps> = ({
           <div className="trace-section-title-row">
             <span className="trace-section-step">{traceIndex + 1}</span>
             <span className="trace-section-title">{trace.title}</span>
+            {onRetryTrace && (
+              <button
+                type="button"
+                className="icon-btn"
+                title={canRetryTraces ? 'Retry this trace' : 'Retry unavailable (missing stage12Context)'}
+                style={{ marginLeft: 'auto' }}
+                disabled={Boolean(isProcessing) || !canRetryTraces}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetryTrace(trace.id);
+                }}
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
           </div>
           {isExpanded && trace.description && (
             <div className="trace-section-desc">
@@ -347,6 +371,9 @@ const TraceSection: React.FC<TraceSectionProps> = ({
 export const CodemapTreeView: React.FC<CodemapTreeViewProps> = ({
   codemap,
   onLocationClick,
+  isProcessing,
+  canRetryTraces,
+  onRetryTrace,
 }) => {
   // Build a map of all locations across all traces for cross-trace references
   const allLocations = useMemo(() => {
@@ -395,6 +422,9 @@ export const CodemapTreeView: React.FC<CodemapTreeViewProps> = ({
           allLocations={allLocations}
           onLocationClick={onLocationClick}
           onFileClick={handleFileClick}
+          isProcessing={isProcessing}
+          canRetryTraces={canRetryTraces}
+          onRetryTrace={onRetryTrace}
         />
       ))}
     </div>
