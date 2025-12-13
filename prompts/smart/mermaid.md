@@ -26,8 +26,6 @@ When writing mermaid diagrams:
 - Avoid angle brackets and HTML entities in labels - they render as literal text:
   - Good: `Files[Files Vec]` or `Files[FilesTuple]`
   - Bad: `Files[\"Vec&lt;T&gt;\"]`
-- When styling subgraphs with background colors, use `style <subgraphId> fill:<color>` and make sure `<subgraphId>` exactly matches the id used in `subgraph <subgraphId>[Label]`.
-- Do NOT put color codes or hex values directly in `subgraph` or node definitions; only set fills via separate `style` lines (and only with the allowed color palette specified in the prompt).
 </mermaid_syntax>
 <user_request>
 make a mermaid diagram now. output it directly using ```mermaid. use node ids like \"1a:\" at the front of your node labels. use subgraphs and annotations.
@@ -40,19 +38,24 @@ If there are disconnected systems within the codemap, they should NOT be connect
 
 label important edges (present tense). dont use emojis.
 
-color the different subgraphs different background colors. nodes can all be same color.
+Example (format template; replace ids/labels/edges):
 
-Use these fill colors for subgraph styles:
-#eebefa
-#fcc2d7
-#d0bfff
-#b2f2bb
-#ffec99
-#ffd8a8
-#99e9f2
-#a5d8ff
-Only use these for subgraph fills, leave other styles to mermaid defaults. ex. style Frontend fill:#fcc2d7
-Do not use any hard-coded colors besides these listed ones. Do not use 'classDef default...'
+```mermaid
+graph TB
+    subgraph init [Init]
+        i1["1a: ..."]
+        i2["1b: ..."]
+        i1 -->|"..."| i2
+    end
+
+    subgraph flow [Flow]
+        f1["2a: ..."]
+        f2["2b: ..."]
+        f1 -->|"..."| f2
+    end
+
+    i2 -.->|"..."| f1
+```
 
 Keep subgraph titles short. Output format:
 <thinking>

@@ -27,6 +27,7 @@ import {
   formatCurrentDate,
   getUserOs,
 } from './utils';
+import { colorizeMermaidDiagram } from './mermaidColorize';
 import * as logger from '../logger';
 
 export interface CodemapCallbacks {
@@ -312,7 +313,8 @@ async function processMermaidDiagram(
       return { error: 'No text in mermaid response' };
     }
 
-    const diagram = extractMermaidDiagram(mermaidResult.text) || undefined;
+    const extracted = extractMermaidDiagram(mermaidResult.text) || undefined;
+    const diagram = extracted ? colorizeMermaidDiagram(extracted) : undefined;
     callbacks.onMessage?.('assistant', '[Mermaid] Mermaid diagram generated');
     logger.info(`[Mermaid] Diagram extracted: ${diagram ? 'YES' : 'NO'}`);
     if (diagram) {
@@ -714,5 +716,66 @@ export async function retryMermaidFromStage12Context(
     callbacks
   );
   return { diagram: result.diagram, error: result.error };
+}
+
+/**
+ * Generate a Mermaid diagram from an existing codemap snapshot (no Stage 1-2 context).
+ * This is used when older codemap files don't have `stage12Context` persisted.
+ */
+export async function generateMermaidFromCodemapSnapshot(
+  codemap: Codemap,
+  callbacks: CodemapCallbacks = {}
+): Promise<{ diagram?: string; error?: string }> {
+  try {
+    const workspaceRoot = codemap.workspacePath || '';
+    const currentDate = formatCurrentDate();
+    const language = getLanguage();
+
+    const workspaceLayout = workspaceRoot ? generateWorkspaceLayout(workspaceRoot) : '';
+    const workspaceUri = workspaceRoot.replace(/\\/g, '\\\\');
+    const corpusName = workspaceRoot.replace(/\\/g, '/');
+
+    const systemPrompt = buildSystemPrompt(codemap.mode === 'fast' ? 'fast' : 'smart', {
+      workspace_root: workspaceRoot,
+      workspace_layout: workspaceLayout,
+      workspace_uri: workspaceUri,
+      corpus_name: corpusName,
+      user_os: getUserOs(),
+      language,
+    });
+
+    // Provide a structured snapshot as base context so stage 6 can draw the global diagram.
+    const snapshot = JSON.stringify(
+      {
+        title: codemap.title,
+        description: codemap.description,
+        traces: codemap.traces,
+      },
+      null,
+      2
+    );
+
+    const baseMessages: CoreMessage[] = [
+      {
+        role: 'user',
+        content:
+          `Here is the codemap snapshot as JSON. Use it as the source of truth.\n\n` +
+          `\`\`\`json\n${snapshot}\n\`\`\``,
+      },
+    ];
+
+    const result = await processMermaidDiagram(
+      systemPrompt,
+      baseMessages,
+      currentDate,
+      language,
+      callbacks
+    );
+
+    return { diagram: result.diagram, error: result.error };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { error: msg };
+  }
 }
 

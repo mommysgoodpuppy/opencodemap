@@ -9,6 +9,7 @@ export {
   retryTraceFromStage12Context,
   retryTraceDiagramFromStage12Context,
   retryMermaidFromStage12Context,
+  generateMermaidFromCodemapSnapshot,
   type CodemapCallbacks,
   type CodemapMode,
   type CodemapStage12ContextV1,
