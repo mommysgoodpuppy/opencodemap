@@ -6,6 +6,7 @@ import { generateText } from 'ai';
 import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt } from '../prompts';
 import type { CodemapSuggestion } from '../types';
+import * as logger from '../logger';
 
 interface SuggestionResponse {
   title: string;
@@ -34,6 +35,8 @@ export async function generateSuggestions(
       prompt: userPrompt,
       maxTokens: 500,
     });
+
+    logger.agentRaw(`[Suggestions] RESPONSE:\n${result.text}`);
 
     // Parse JSON from response
     const jsonMatch = result.text.match(/\[[\s\S]*\]/);

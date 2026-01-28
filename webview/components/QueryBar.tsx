@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { ModelInfo } from '../types';
+import { Settings2 } from 'lucide-react';
 
 interface QueryBarProps {
   query: string;
@@ -12,6 +13,7 @@ interface QueryBarProps {
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
   onCancel: () => void;
+  onPickTools: () => void;
 }
 
 /**
@@ -29,6 +31,7 @@ export const QueryBar: React.FC<QueryBarProps> = ({
   selectedModel,
   onSelectModel,
   onCancel,
+  onPickTools,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -88,6 +91,14 @@ export const QueryBar: React.FC<QueryBarProps> = ({
             </select>
           </div>
         )}
+        <button
+          className="icon-btn tool-pick-btn"
+          onClick={onPickTools}
+          title="Enable/Disable VS Code Agent Tools"
+          disabled={isProcessing}
+        >
+          <Settings2 size={16} />
+        </button>
         <div className="mode-toggle">
           <button
             className={`mode-btn ${mode === 'fast' ? 'active' : ''}`}

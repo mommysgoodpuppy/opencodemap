@@ -16,6 +16,8 @@ import { generateText, CoreMessage } from 'ai';
 import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon, loadMermaidPrompt } from '../prompts';
 import { allTools } from '../tools';
+import { getSelectedVsCodeTools } from '../tools/vscodeTools';
+import { extensionContext } from '../extension';
 import type { Codemap } from '../types';
 import {
   generateWorkspaceLayout,
@@ -137,6 +139,7 @@ async function processTraceStages(
     logger.info(`[Trace ${traceId}] Stage 3: API response received, text length: ${stage3Result.text?.length || 0}`);
 
     if (stage3Result.text) {
+      logger.agentRaw(`[Trace ${traceId} Stage 3] RESPONSE:\n${stage3Result.text}`);
       messages.push({ role: 'assistant', content: stage3Result.text });
       callbacks.onMessage?.('assistant', `[Trace ${traceId} Stage 3] Generated initial diagram`);
     } else {
@@ -163,6 +166,7 @@ async function processTraceStages(
     logger.info(`[Trace ${traceId}] Stage 4: API response received, text length: ${stage4Result.text?.length || 0}`);
 
     if (stage4Result.text) {
+      logger.agentRaw(`[Trace ${traceId} Stage 4] RESPONSE:\n${stage4Result.text}`);
       messages.push({ role: 'assistant', content: stage4Result.text });
       diagram = extractTraceDiagram(stage4Result.text) || undefined;
       logger.info(`[Trace ${traceId}] Stage 4: Diagram extracted: ${diagram ? 'YES' : 'NO'}`);
@@ -195,6 +199,7 @@ async function processTraceStages(
       logger.info(`[Trace ${traceId}] Stage 5: API response received, text length: ${stage5Result.text?.length || 0}`);
 
       if (stage5Result.text) {
+        logger.agentRaw(`[Trace ${traceId} Stage 5] RESPONSE:\n${stage5Result.text}`);
         guide = extractTraceGuide(stage5Result.text) || undefined;
         logger.info(`[Trace ${traceId}] Stage 5: Guide extracted: ${guide ? 'YES' : 'NO'}`);
         if (guide) {
@@ -208,10 +213,13 @@ async function processTraceStages(
       logger.info(`[Trace ${traceId}] Stage 5: Complete`);
     }
 
-    logger.info(`[Trace ${traceId}] Trace processing complete - diagram: ${!!diagram}, guide: ${!!guide}`);
     return { traceId, diagram, guide };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    if (options.abortSignal?.aborted || errorMsg.includes('cancelled') || errorMsg.includes('aborted')) {
+      logger.info(`[Trace ${traceId}] Trace processing cancelled`);
+      throw error;
+    }
     const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[Trace ${traceId}] Error during trace processing: ${errorMsg}`);
     if (errorStack) {
@@ -262,6 +270,8 @@ async function processMermaidDiagram(
       return { error: 'No text in mermaid response' };
     }
 
+    logger.agentRaw(`[Mermaid Stage 6] RESPONSE:\n${mermaidResult.text}`);
+
     const extracted = extractMermaidDiagram(mermaidResult.text) || undefined;
     const diagram = extracted ? colorizeMermaidDiagram(extracted) : undefined;
     callbacks.onMessage?.('assistant', '[Mermaid] Mermaid diagram generated');
@@ -272,6 +282,10 @@ async function processMermaidDiagram(
     return { diagram };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    if (abortSignal?.aborted || errorMsg.includes('cancelled') || errorMsg.includes('aborted')) {
+      logger.info('[Mermaid] Mermaid generation cancelled');
+      throw error;
+    }
     logger.error(`[Mermaid] Error during mermaid generation: ${errorMsg}`);
     return { error: errorMsg };
   }
@@ -366,11 +380,14 @@ export async function generateCodemap(
       
       if (abortSignal?.aborted) throw new Error('Generation cancelled');
 
+      const vsCodeTools = extensionContext ? getSelectedVsCodeTools(extensionContext) : {};
+      const dynamicTools = { ...allTools, ...vsCodeTools };
+
       const result = await generateText({
         model: client(getModelName()),
         system: systemPrompt,
         messages,
-        tools: allTools,
+        tools: dynamicTools,
         abortSignal,
         onStepFinish: (step) => {
           logger.debug(`Stage 1 - Step finished: text=${!!step.text}, toolCalls=${step.toolCalls?.length || 0}`);
@@ -393,6 +410,7 @@ export async function generateCodemap(
               );
               if (toolResult) {
                 logger.debug(`Stage 1 - Tool result length: ${String(toolResult.result).length}`);
+                logger.agentRaw(`[Stage 1 Research] TOOL CALL: ${tc.toolName}(${JSON.stringify(tc.args)})\nRESULT: ${String(toolResult.result).slice(0, 1000)}${String(toolResult.result).length > 1000 ? '...' : ''}`);
               }
               callbacks.onToolCall?.(
                 tc.toolName,
@@ -407,6 +425,7 @@ export async function generateCodemap(
       logger.info(`Stage 1 - API response received: steps=${result.steps.length}, text=${!!result.text}`);
       
       if (result.text) {
+        logger.agentRaw(`[Stage 1 Research] RESPONSE Iteration ${researchIteration}:\n${result.text}`);
         logger.debug(`Stage 1 - Response text length: ${result.text.length}`);
         messages.push({ role: 'assistant', content: result.text });
         if (isResearchComplete(result.text)) {
@@ -454,6 +473,7 @@ export async function generateCodemap(
     logger.info(`Stage 2 - API response received: text=${!!stage2Result.text}`);
 
     if (stage2Result.text) {
+      logger.agentRaw(`[Stage 2 Structure] RESPONSE:\n${stage2Result.text}`);
       logger.debug(`Stage 2 - Response text length: ${stage2Result.text.length}`);
       messages.push({ role: 'assistant', content: stage2Result.text });
       callbacks.onMessage?.('assistant', stage2Result.text);
@@ -527,10 +547,16 @@ export async function generateCodemap(
 
       logger.info('Waiting for all trace processing to complete...');
       const mermaidRunner = mermaidPromise ?? Promise.resolve<MermaidProcessingResult | null>(null);
+      
+      if (abortSignal?.aborted) throw new Error('Generation cancelled');
+
       const [traceResults, mermaidResult] = await Promise.all([
         Promise.all(tracePromises),
         mermaidRunner,
       ]);
+      
+      if (abortSignal?.aborted) throw new Error('Generation cancelled');
+      
       logger.info(`All ${traceResults.length} traces processed`);
 
       let successCount = 0;

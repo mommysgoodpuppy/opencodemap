@@ -52,12 +52,14 @@ export function useExtensionCommands() {
       loadHistory: (filename: string) => api.postMessage({ command: 'loadHistory', filename }),
       refreshSuggestions: () => api.postMessage({ command: 'refreshSuggestions' }),
       openJson: () => api.postMessage({ command: 'openJson' }),
+      openMermaid: () => api.postMessage({ command: 'openMermaid' }),
       ensureMermaidDiagram: () => api.postMessage({ command: 'ensureMermaidDiagram' }),
       retryTrace: (traceId: string) => api.postMessage({ command: 'retryTrace', traceId }),
       retryAllTraces: () => api.postMessage({ command: 'retryAllTraces' }),
       regenerateMermaidDiagram: () => api.postMessage({ command: 'regenerateMermaidDiagram' }),
       selectModel: (modelId: string) => api.postMessage({ command: 'selectModel', modelId }),
       cancel: () => api.postMessage({ command: 'cancel' }),
+      pickTools: () => api.postMessage({ command: 'pickTools' }),
     }),
     [api]
   );

@@ -47,26 +47,70 @@ export class CodemapChatModelProvider implements vscode.LanguageModelChatProvide
             baseURL: baseUrl,
         });
 
-        const coreMessages: CoreMessage[] = messages.map(msg => ({
-            role: msg.role === vscode.LanguageModelChatMessageRole.User ? 'user' : 'assistant',
-            content: msg.content
-                .filter(part => part instanceof vscode.LanguageModelTextPart)
-                .map(part => (part as vscode.LanguageModelTextPart).value)
-                .join('')
-        }));
+        const coreMessages: CoreMessage[] = messages.map(msg => {
+            const role = msg.role === vscode.LanguageModelChatMessageRole.User ? 'user' : 'assistant';
+            
+            // Map complex content parts (text, tool results, tool calls)
+            if (msg.content.some(part => !(part instanceof vscode.LanguageModelTextPart))) {
+                const content: any[] = msg.content.map(part => {
+                    if (part instanceof vscode.LanguageModelTextPart) {
+                        return { type: 'text', text: part.value };
+                    }
+                    if (part instanceof vscode.LanguageModelToolResultPart) {
+                        return { type: 'tool-result', toolCallId: part.callId, result: part.content };
+                    }
+                    if (part instanceof vscode.LanguageModelToolCallPart) {
+                        return { type: 'tool-call', toolCallId: part.callId, toolName: part.name, args: part.input };
+                    }
+                    return null;
+                }).filter(p => p !== null);
+                
+                return { role, content } as CoreMessage;
+            }
+
+            // Simple text content
+            return {
+                role,
+                content: msg.content
+                    .filter(part => part instanceof vscode.LanguageModelTextPart)
+                    .map(part => (part as vscode.LanguageModelTextPart).value)
+                    .join('')
+            };
+        });
+
+        // Convert VS Code tools to AI SDK tools
+        const tools: Record<string, any> = {};
+        if (options.tools) {
+            options.tools.forEach(t => {
+                // We create "intent-only" tools that don't execute, 
+                // we just want AI SDK to recognize them.
+                tools[t.name] = {
+                    description: t.description,
+                    parameters: t.inputSchema as any,
+                };
+            });
+        }
 
         try {
-            const { textStream } = await streamText({
+            const { fullStream } = await streamText({
                 model: openai(modelName) as LanguageModelV1,
                 messages: coreMessages,
-                abortSignal: (token as any).signal, // Attempt to use cancellation token
+                tools: Object.keys(tools).length > 0 ? tools : undefined,
+                abortSignal: (token as any).signal,
             });
 
-            for await (const chunk of textStream) {
-                if (token.isCancellationRequested) {
-                    break;
+            for await (const part of fullStream) {
+                if (token.isCancellationRequested) break;
+
+                if (part.type === 'text-delta') {
+                    progress.report(new vscode.LanguageModelTextPart(part.textDelta));
+                } else if (part.type === 'tool-call') {
+                    progress.report(new vscode.LanguageModelToolCallPart(
+                        part.toolCallId,
+                        part.toolName,
+                        JSON.parse(part.args)
+                    ));
                 }
-                progress.report(new vscode.LanguageModelTextPart(chunk));
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);

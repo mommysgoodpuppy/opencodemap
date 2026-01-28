@@ -98,12 +98,14 @@ export type WebviewToExtensionMessage =
   | { command: 'loadHistory'; filename: string }
   | { command: 'refreshSuggestions' }
   | { command: 'openJson' }
+  | { command: 'openMermaid' }
   | { command: 'ensureMermaidDiagram' }
   | { command: 'retryTrace'; traceId: string }
   | { command: 'retryAllTraces' }
   | { command: 'regenerateMermaidDiagram' }
   | { command: 'selectModel'; modelId: string }
-  | { command: 'cancel' };
+  | { command: 'cancel' }
+  | { command: 'pickTools' };
 
 // Messages from Extension to Webview
 export type ExtensionToWebviewMessage =

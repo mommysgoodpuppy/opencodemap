@@ -225,6 +225,16 @@ body {
   background: var(--vscode-toolbar-hoverBackground, #5a5a5a33);
 }
 
+.tool-pick-btn {
+  margin-left: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.tool-pick-btn:hover {
+  opacity: 1;
+}
+
 .suggestion-item {
   padding: 8px 10px;
   margin-bottom: 4px;

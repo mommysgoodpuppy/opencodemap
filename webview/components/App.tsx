@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw } from 'lucide-react';
+import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw, FileText } from 'lucide-react';
 import { QueryBar } from './QueryBar';
 import { SuggestionSection } from './SuggestionSection';
 import { CodemapList } from './CodemapList';
@@ -167,6 +167,10 @@ export const App: React.FC = () => {
     commands.openJson();
   }, [commands]);
 
+  const handleOpenMermaid = useCallback(() => {
+    commands.openMermaid();
+  }, [commands]);
+
   const handleRetryTrace = useCallback((traceId: string) => {
     if (state.isProcessing) return;
     commands.retryTrace(traceId);
@@ -202,6 +206,10 @@ export const App: React.FC = () => {
     commands.cancel();
   }, [commands]);
 
+  const handlePickTools = useCallback(() => {
+    commands.pickTools();
+  }, [commands]);
+
   // Build location map for description links
   const allLocations = useMemo(() => {
     const map = new Map<string, CodemapLocation>();
@@ -230,6 +238,7 @@ export const App: React.FC = () => {
           selectedModel={state.selectedModel}
           onSelectModel={handleSelectModel}
           onCancel={handleCancel}
+          onPickTools={handlePickTools}
         />
 
         <SuggestionSection
@@ -330,6 +339,15 @@ export const App: React.FC = () => {
           >
             <FileJson size={14} />
             JSON
+          </button>
+          <button
+            className="view-tab"
+            onClick={handleOpenMermaid}
+            title="Export Mermaid diagram"
+            disabled={!state.codemap?.mermaidDiagram}
+          >
+            <FileText size={14} />
+            Mermaid
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 
 let outputChannel: vscode.OutputChannel | null = null;
+let agentOutputChannel: vscode.OutputChannel | null = null;
 
 /**
  * Initialize the logger with a VSCode Output Channel
@@ -15,6 +16,16 @@ export function initLogger(): vscode.OutputChannel {
     outputChannel = vscode.window.createOutputChannel('Codemap Agent');
   }
   return outputChannel;
+}
+
+/**
+ * Initialize the agent output logger with a VSCode Output Channel
+ */
+export function initAgentLogger(): vscode.OutputChannel {
+  if (!agentOutputChannel) {
+    agentOutputChannel = vscode.window.createOutputChannel('Codemap Agent (Raw)');
+  }
+  return agentOutputChannel;
 }
 
 /**
@@ -92,10 +103,29 @@ export function debug(message: string, ...args: unknown[]): void {
 }
 
 /**
+ * Log raw agent output message
+ */
+export function agentRaw(message: string): void {
+  if (!agentOutputChannel) {
+    initAgentLogger();
+  }
+  
+  const timestamp = new Date().toISOString();
+  agentOutputChannel!.appendLine(`[${timestamp}] ${message}`);
+}
+
+/**
  * Show the output channel
  */
 export function show(): void {
   outputChannel?.show(true);
+}
+
+/**
+ * Show the agent output channel
+ */
+export function showRaw(): void {
+  agentOutputChannel?.show(true);
 }
 
 /**
@@ -111,6 +141,8 @@ export function clear(): void {
 export function dispose(): void {
   outputChannel?.dispose();
   outputChannel = null;
+  agentOutputChannel?.dispose();
+  agentOutputChannel = null;
 }
 
 /**

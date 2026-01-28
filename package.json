@@ -40,6 +40,10 @@
       {
         "command": "codemap.showAgentLog",
         "title": "Codemap: Show Agent Log"
+      },
+      {
+        "command": "codemap.showRawAgentLog",
+        "title": "Codemap: Show Raw Agent Log"
       }
     ],
     "viewsContainers": {

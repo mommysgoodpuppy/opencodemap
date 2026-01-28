@@ -57,6 +57,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _availableModels: ModelInfo[] = [];
   private _selectedModel: string = '';
   private _abortController: AbortController | null = null;
+  private _currentGenerationId: number = 0;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     // Track recent file access
@@ -197,6 +198,12 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'openJson':
           this._openCodemapJson();
+          break;
+        case 'openMermaid':
+          this._openCodemapMermaid();
+          break;
+        case 'pickTools':
+          vscode.commands.executeCommand('codemap.pickTools');
           break;
       }
     });
@@ -557,6 +564,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     
     this._updateWebview();
 
+    const generationId = ++this._currentGenerationId;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     logger.info(`Workspace root: ${workspaceRoot}`);
 
@@ -567,11 +575,13 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
 
     const callbacks = {
       onMessage: (role: string, content: string) => {
+        if (this._currentGenerationId !== generationId) return;
         logger.debug(`[Callback] onMessage - role: ${role}, content length: ${content.length}`);
         this._messages.push({ role, content });
         this._updateWebview();
       },
       onToolCall: (tool: string, args: string, result: string) => {
+        if (this._currentGenerationId !== generationId) return;
         logger.debug(`[Callback] onToolCall - tool: ${tool}`);
         this._messages.push({
           role: 'tool',
@@ -580,6 +590,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         this._updateWebview();
       },
       onCodemapUpdate: (codemap: Codemap) => {
+        if (this._currentGenerationId !== generationId) return;
         logger.info(`[Callback] onCodemapUpdate - title: ${codemap.title}, traces: ${codemap.traces.length}`);
         this._codemap = stage12Context
           ? { ...codemap, stage12Context, query, mode }
@@ -597,6 +608,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         this._updateWebview();
       },
       onStage12ContextReady: (context: Codemap['stage12Context']) => {
+        if (this._currentGenerationId !== generationId) return;
         stage12Context = context;
         if (this._codemap) {
           this._codemap = { ...this._codemap, stage12Context, query, mode };
@@ -604,6 +616,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         }
       },
       onPhaseChange: (phase: string, stageNumber: number) => {
+        if (this._currentGenerationId !== generationId) return;
         logger.info(`[Callback] onPhaseChange - phase: ${phase}, stage: ${stageNumber}`);
         
         if (this._progress) {
@@ -642,6 +655,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         this._updateWebview();
       },
       onTraceProcessing: (traceId: string, stage: number, status: 'start' | 'complete') => {
+        if (this._currentGenerationId !== generationId) return;
         logger.debug(`[Callback] onTraceProcessing - trace: ${traceId}, stage: ${stage}, status: ${status}`);
         
         if (this._progress) {
@@ -747,6 +761,10 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         logger.warn('No codemap was generated (this._codemap is null)');
       }
     } catch (error) {
+      if (this._abortController?.signal.aborted || (error instanceof Error && (error.message.includes('cancelled') || error.message.includes('aborted')))) {
+        logger.info('Generation cancelled by user');
+        return;
+      }
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       logger.error(`Codemap generation failed: ${errorMsg}`);
@@ -788,6 +806,27 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to open codemap file: ${filePath}`);
+    }
+  }
+
+  private async _openCodemapMermaid() {
+    if (!this._codemap || !this._codemap.mermaidDiagram) {
+      vscode.window.showWarningMessage('No Mermaid diagram available');
+      return;
+    }
+
+    const content = `\`\`\`mermaid\n${this._codemap.mermaidDiagram}\n\`\`\``.replace(/\r\n/g, '\n');
+
+    try {
+      const doc = await vscode.workspace.openTextDocument({
+        content,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+      });
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to open Mermaid export: ${error}`);
     }
   }
 

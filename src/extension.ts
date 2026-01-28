@@ -6,15 +6,21 @@ import * as vscode from 'vscode';
 import { CodemapViewProvider } from './views/CodemapViewProvider';
 import { isConfigured, refreshConfig } from './agent';
 import { getStoragePath, listCodemaps } from './storage/codemapStorage';
-import { initLogger, info, show as showLogger } from './logger';
+import { initLogger, initAgentLogger, info, show as showLogger, showRaw as showRawLogger } from './logger';
 import { CodemapChatModelProvider } from './lmProvider';
+import { pickVsCodeTools } from './tools/vscodeTools';
 
+export let extensionContext: vscode.ExtensionContext;
 let codemapViewProvider: CodemapViewProvider;
 
 export function activate(context: vscode.ExtensionContext) {
+	extensionContext = context;
 	// Initialize logger first
 	const outputChannel = initLogger();
 	context.subscriptions.push(outputChannel);
+	
+	const agentOutputChannel = initAgentLogger();
+	context.subscriptions.push(agentOutputChannel);
 	
 	info('Codemap extension is now active!');
 
@@ -124,6 +130,20 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('codemap.showAgentLog', () => {
 			showLogger();
+		})
+	);
+
+	// Command: Show Raw Agent Log (for debugging)
+	context.subscriptions.push(
+		vscode.commands.registerCommand('codemap.showRawAgentLog', () => {
+			showRawLogger();
+		})
+	);
+
+	// Command: Pick Tools
+	context.subscriptions.push(
+		vscode.commands.registerCommand('codemap.pickTools', () => {
+			pickVsCodeTools(context);
 		})
 	);
 
