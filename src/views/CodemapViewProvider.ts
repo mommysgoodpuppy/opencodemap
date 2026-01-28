@@ -3,7 +3,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { Codemap } from '../types';
+import type { Codemap, DetailLevel } from '../types';
 import {
   generateFastCodemap,
   generateSmartCodemap,
@@ -38,6 +38,8 @@ interface ProgressState {
   completedStages: number;
   activeAgents: ActiveAgent[];
   currentPhase: string;
+  totalTokens?: number;
+  totalToolCalls?: number;
 }
 
 export class CodemapViewProvider implements vscode.WebviewViewProvider {
@@ -49,6 +51,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _messages: Array<{ role: string; content: string }> = [];
   private _isProcessing = false;
   private _mode: 'fast' | 'smart' = 'smart';
+  private _detailLevel: DetailLevel = 'overview';
   private _suggestions: Array<{ id: string; text: string; sub?: string; startingPoints?: string[] }> = [];
   private _recentFiles: string[] = [];
   private _refreshTimer: NodeJS.Timeout | null = null;
@@ -58,6 +61,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _selectedModel: string = '';
   private _abortController: AbortController | null = null;
   private _currentGenerationId: number = 0;
+  private _lastTokenUpdateAt: number = 0;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     // Track recent file access
@@ -155,7 +159,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           this._updateWebview();
           break;
         case 'submit':
-          await this._handleSubmit(message.query, message.mode);
+          await this._handleSubmit(message.query, message.mode, message.detailLevel);
           break;
         case 'ensureMermaidDiagram':
           await this._generateMermaidDiagram(false);
@@ -240,14 +244,29 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         { id: 'mermaid', label: `${actionLabel} Mermaid diagram...`, startTime: Date.now() },
       ],
       currentPhase: `${actionLabel} Mermaid diagram...`,
+      totalTokens: 0,
+      totalToolCalls: 0,
     };
     this._updateWebview();
 
     this._abortController = new AbortController();
     try {
+      const callbacks = {
+        onToken: () => {
+          if (this._progress) {
+            this._progress.totalTokens = (this._progress.totalTokens || 0) + 1;
+            const now = Date.now();
+            if (!this._lastTokenUpdateAt || now - this._lastTokenUpdateAt > 100) {
+              this._lastTokenUpdateAt = now;
+              this._updateWebview();
+            }
+          }
+        }
+      };
+      
       const result = this._codemap.stage12Context
-        ? await retryMermaidFromStage12Context(this._codemap.stage12Context, {}, this._abortController.signal)
-        : await generateMermaidFromCodemapSnapshot(this._codemap, {}, this._abortController.signal);
+        ? await retryMermaidFromStage12Context(this._codemap.stage12Context, callbacks, this._abortController.signal)
+        : await generateMermaidFromCodemapSnapshot(this._codemap, callbacks, this._abortController.signal);
 
       if (result.error) {
         throw new Error(result.error);
@@ -309,6 +328,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       completedStages: 0,
       activeAgents: [{ id: `trace-${traceId}`, label: `Retrying Trace ${traceId}...`, startTime: Date.now() }],
       currentPhase: 'Retrying trace...',
+      totalTokens: 0,
+      totalToolCalls: 0,
     };
     this._updateWebview();
 
@@ -321,6 +342,22 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       };
 
       const result = await retryTraceFromStage12Context(traceId, ctx, {
+        onToken: () => {
+          if (this._progress) {
+            this._progress.totalTokens = (this._progress.totalTokens || 0) + 1;
+            const now = Date.now();
+            if (!this._lastTokenUpdateAt || now - this._lastTokenUpdateAt > 100) {
+              this._lastTokenUpdateAt = now;
+              this._updateWebview();
+            }
+          }
+        },
+        onToolCall: (tool) => {
+          if (this._progress) {
+            this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
+          }
+          this._updateWebview();
+        },
         onTraceProcessing: (_tid, stage, status) => {
           if (!this._progress) {
             return;
@@ -409,6 +446,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       completedStages: 0,
       activeAgents: [{ id: 'retry-all', label: 'Retrying all traces...', startTime: Date.now() }],
       currentPhase: 'Retrying all traces...',
+      totalTokens: 0,
+      totalToolCalls: 0,
     };
     this._updateWebview();
 
@@ -419,6 +458,22 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           const traceId = t.id;
           const labels = stageLabelsFor(traceId);
           const res = await retryTraceFromStage12Context(traceId, ctx, {
+            onToken: () => {
+              if (this._progress) {
+                this._progress.totalTokens = (this._progress.totalTokens || 0) + 1;
+                const now = Date.now();
+                if (!this._lastTokenUpdateAt || now - this._lastTokenUpdateAt > 100) {
+                  this._lastTokenUpdateAt = now;
+                  this._updateWebview();
+                }
+              }
+            },
+            onToolCall: (tool) => {
+              if (this._progress) {
+                this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
+              }
+              this._updateWebview();
+            },
             onTraceProcessing: (tid, stage, status) => {
               if (!this._progress) {
                 return;
@@ -526,7 +581,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private async _handleSubmit(query: string, mode: 'fast' | 'smart') {
+  private async _handleSubmit(query: string, mode: 'fast' | 'smart', detailLevel: DetailLevel) {
     logger.separator('WEBVIEW SUBMIT');
     logger.info(`Submit received - query: "${query}", mode: ${mode}`);
     
@@ -545,6 +600,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     logger.info('Starting codemap generation...');
     this._isProcessing = true;
     this._mode = mode;
+    this._detailLevel = detailLevel;
     this._messages = [];
     this._codemap = null;
     
@@ -560,6 +616,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         startTime: Date.now(),
       }],
       currentPhase: 'Starting codemap generation...',
+      totalTokens: 0,
+      totalToolCalls: 0,
     };
     
     this._updateWebview();
@@ -583,6 +641,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       onToolCall: (tool: string, args: string, result: string) => {
         if (this._currentGenerationId !== generationId) return;
         logger.debug(`[Callback] onToolCall - tool: ${tool}`);
+        
+        if (this._progress) {
+          this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
+        }
+
         this._messages.push({
           role: 'tool',
           content: `[${tool}]\n${args}\n---\n${result.slice(0, 300)}${result.length > 300 ? '...' : ''}`,
@@ -593,8 +656,8 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         if (this._currentGenerationId !== generationId) return;
         logger.info(`[Callback] onCodemapUpdate - title: ${codemap.title}, traces: ${codemap.traces.length}`);
         this._codemap = stage12Context
-          ? { ...codemap, stage12Context, query, mode }
-          : { ...codemap, query, mode };
+          ? { ...codemap, stage12Context, query, mode, detailLevel }
+          : { ...codemap, query, mode, detailLevel };
         
         // Update total stages when we know the number of traces
         if (codemap.traces.length > 0 && numTraces !== codemap.traces.length) {
@@ -611,7 +674,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         if (this._currentGenerationId !== generationId) return;
         stage12Context = context;
         if (this._codemap) {
-          this._codemap = { ...this._codemap, stage12Context, query, mode };
+          this._codemap = { ...this._codemap, stage12Context, query, mode, detailLevel };
           this._updateWebview();
         }
       },
@@ -715,15 +778,29 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         
         this._updateWebview();
       },
+      onToken: () => {
+        if (this._currentGenerationId !== generationId) return;
+        if (this._progress) {
+          this._progress.totalTokens = (this._progress.totalTokens || 0) + 1;
+          
+          // Throttle updates to webview to avoid overwhelming it with messages
+          // but enough to show smooth "streaming" effect
+          const now = Date.now();
+          if (!this._lastTokenUpdateAt || now - this._lastTokenUpdateAt > 100) {
+            this._lastTokenUpdateAt = now;
+            this._updateWebview();
+          }
+        }
+      },
     };
 
     this._abortController = new AbortController();
     try {
       logger.info(`Calling generate${mode === 'fast' ? 'Fast' : 'Smart'}Codemap...`);
       if (mode === 'fast') {
-        await generateFastCodemap(query, workspaceRoot, callbacks, this._abortController.signal);
+        await generateFastCodemap(query, workspaceRoot, detailLevel, callbacks, this._abortController.signal);
       } else {
-        await generateSmartCodemap(query, workspaceRoot, callbacks, this._abortController.signal);
+        await generateSmartCodemap(query, workspaceRoot, detailLevel, callbacks, this._abortController.signal);
       }
       logger.info('Codemap generation function returned');
 
@@ -877,6 +954,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         messages: this._messages,
         isProcessing: this._isProcessing,
         mode: this._mode,
+        detailLevel: this._detailLevel,
         suggestions: this._suggestions,
         history: this._getHistory(),
         progress: this._progress,

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import type { VsCodeApi, WebviewToExtensionMessage } from './types';
+import type { VsCodeApi, WebviewToExtensionMessage, DetailLevel } from './types';
 
 /**
  * VS Code webview API can only be acquired once per webview.
@@ -44,8 +44,8 @@ export function useExtensionCommands() {
     () => ({
       send: (message: WebviewToExtensionMessage) => api.postMessage(message),
       ready: () => api.postMessage({ command: 'ready' }),
-      submit: (query: string, mode: 'fast' | 'smart') =>
-        api.postMessage({ command: 'submit', query, mode }),
+      submit: (query: string, mode: 'fast' | 'smart', detailLevel: DetailLevel) =>
+        api.postMessage({ command: 'submit', query, mode, detailLevel }),
       openFile: (path: string, line: number) => api.postMessage({ command: 'openFile', path, line }),
       refreshHistory: () => api.postMessage({ command: 'refreshHistory' }),
       deleteHistory: (filename: string) => api.postMessage({ command: 'deleteHistory', filename }),

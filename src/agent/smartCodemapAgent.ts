@@ -5,15 +5,16 @@
  */
 
 import { generateCodemap, CodemapCallbacks } from './codemapAgent';
-import type { Codemap } from '../types';
+import type { Codemap, DetailLevel } from '../types';
 
 export type { CodemapCallbacks as SmartCodemapCallbacks };
 
 export async function generateSmartCodemap(
   query: string,
   workspaceRoot: string,
+  detailLevel?: DetailLevel,
   callbacks: CodemapCallbacks = {},
   abortSignal?: AbortSignal
 ): Promise<Codemap | null> {
-  return generateCodemap(query, workspaceRoot, 'smart', callbacks, abortSignal);
+  return generateCodemap(query, workspaceRoot, 'smart', detailLevel, callbacks, abortSignal);
 }

@@ -14,11 +14,13 @@ import type {
   ExtensionToWebviewMessage,
   ProgressState,
   ModelInfo,
+  DetailLevel,
 } from '../types';
 
 interface AppState {
   query: string;
   mode: 'fast' | 'smart';
+  detailLevel: DetailLevel;
   isProcessing: boolean;
   codemap: Codemap | null;
   suggestions: CodemapSuggestion[];
@@ -43,6 +45,7 @@ export const App: React.FC = () => {
     return {
       query: saved?.query || '',
       mode: saved?.mode || 'smart',
+      detailLevel: saved?.detailLevel || 'overview',
       isProcessing: false,
       codemap: null,
       suggestions: [],
@@ -59,6 +62,7 @@ export const App: React.FC = () => {
     api.setState({
       query: state.query,
       mode: state.mode,
+      detailLevel: state.detailLevel,
       activeView: state.activeView,
       page: state.page,
     });
@@ -128,11 +132,15 @@ export const App: React.FC = () => {
     setState((prev) => ({ ...prev, mode }));
   }, []);
 
+  const handleDetailLevelChange = useCallback((detailLevel: DetailLevel) => {
+    setState((prev) => ({ ...prev, detailLevel }));
+  }, []);
+
   const handleSubmit = useCallback(() => {
     if (state.query.trim() && !state.isProcessing) {
-      commands.submit(state.query.trim(), state.mode);
+      commands.submit(state.query.trim(), state.mode, state.detailLevel);
     }
-  }, [commands, state.query, state.mode, state.isProcessing]);
+  }, [commands, state.query, state.mode, state.detailLevel, state.isProcessing]);
 
   const handleSuggestionClick = useCallback((suggestion: CodemapSuggestion) => {
     // Only fill query, don't auto-submit
@@ -230,9 +238,11 @@ export const App: React.FC = () => {
         <QueryBar
           query={state.query}
           mode={state.mode}
+          detailLevel={state.detailLevel}
           isProcessing={state.isProcessing}
           onQueryChange={handleQueryChange}
           onModeChange={handleModeChange}
+          onDetailLevelChange={handleDetailLevelChange}
           onSubmit={handleSubmit}
           availableModels={state.availableModels}
           selectedModel={state.selectedModel}

@@ -18,7 +18,7 @@ import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallel
 import { allTools } from '../tools';
 import { getSelectedVsCodeTools } from '../tools/vscodeTools';
 import { extensionContext } from '../extension';
-import type { Codemap } from '../types';
+import type { Codemap, DetailLevel } from '../types';
 import {
   generateWorkspaceLayout,
   extractCodemapFromResponse,
@@ -44,6 +44,7 @@ export interface CodemapCallbacks {
    * the user wants persisted for retries.
    */
   onStage12ContextReady?: (context: CodemapStage12ContextV1) => void;
+  onToken?: () => void;
 }
 
 export type CodemapMode = 'fast' | 'smart';
@@ -57,6 +58,7 @@ export interface CodemapStage12ContextV1 {
   createdAt: string;
   query: string;
   mode: CodemapMode;
+  detailLevel: DetailLevel;
   workspaceRoot: string;
   currentDate: string;
   language: string;
@@ -111,9 +113,7 @@ async function processTraceStages(
   options: TraceProcessingOptions = { includeGuide: true }
 ): Promise<TraceProcessingResult> {
   const stagesDescription = options.includeGuide ? 'stages 3-5' : 'stages 3-4';
-  logger.info(`[Trace ${traceId}] Starting trace processing (${stagesDescription})`);
-  
-  const client = getAIClient()!;
+  const client = getAIClient({ onToken: callbacks.onToken })!;
 
   const messages: CoreMessage[] = [...baseMessages];
   let diagram: string | undefined;
@@ -243,7 +243,7 @@ async function processMermaidDiagram(
 ): Promise<MermaidProcessingResult> {
   logger.info('[Mermaid] Starting mermaid diagram generation');
 
-  const client = getAIClient()!;
+  const client = getAIClient({ onToken: callbacks.onToken })!;
 
   const messages: CoreMessage[] = [...baseMessages];
 
@@ -312,6 +312,7 @@ export async function generateCodemap(
   query: string,
   workspaceRoot: string,
   mode: CodemapMode,
+  detailLevel: DetailLevel = 'overview',
   callbacks: CodemapCallbacks = {},
   abortSignal?: AbortSignal
 ): Promise<Codemap | null> {
@@ -319,13 +320,14 @@ export async function generateCodemap(
   logger.info(`Query: ${query}`);
   logger.info(`Workspace: ${workspaceRoot}`);
   logger.info(`Mode: ${mode}`);
+  logger.info(`Detail Level: ${detailLevel}`);
   
   if (!isConfigured()) {
     logger.error('OpenAI API key not configured');
     throw new Error('OpenAI API key not configured');
   }
 
-  const client = getAIClient()!;
+  const client = getAIClient({ onToken: callbacks.onToken })!;
   logger.info('OpenAI client created successfully');
 
   // Prepare template variables
@@ -364,6 +366,7 @@ export async function generateCodemap(
       query,
       current_date: currentDate,
       language,
+      detail_level: detailLevel === 'overview' ? '' : `Please be very thorough and exhaustive. Aim for a high level of detail (level: ${detailLevel}).`,
     });
     logger.debug(`Stage 1 prompt length: ${stage1Prompt.length}`);
     
@@ -455,6 +458,7 @@ export async function generateCodemap(
       query,
       current_date: currentDate,
       language,
+      detail_instruction: getDetailInstruction(detailLevel),
     });
     logger.debug(`Stage 2 prompt length: ${stage2Prompt.length}`);
     
@@ -497,6 +501,7 @@ export async function generateCodemap(
             createdAt: new Date().toISOString(),
             query,
             mode,
+            detailLevel,
             workspaceRoot,
             currentDate,
             language,
@@ -763,6 +768,22 @@ export async function generateMermaidFromCodemapSnapshot(
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { error: msg };
+  }
+}
+
+function getDetailInstruction(level: DetailLevel): string {
+  switch (level) {
+    case 'low':
+      return 'The resulting codemap should be detailed, containing at least 10 nodes/locations across all traces combined.';
+    case 'medium':
+      return 'The resulting codemap should be very detailed, containing at least 30 nodes/locations across all traces combined.';
+    case 'high':
+      return 'The resulting codemap should be extremely detailed, containing at least 60 nodes/locations across all traces combined.';
+    case 'ultra':
+      return 'The resulting codemap MUST be massive and exhaustive (ULTRA detail). Aim for a minimum of 100 nodes/locations across all traces combined. Break down every significant component and interaction.';
+    case 'overview':
+    default:
+      return '';
   }
 }
 

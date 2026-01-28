@@ -132,8 +132,30 @@ export const CodemapList: React.FC<CodemapListProps> = ({
 
           {/* Rotating status text */}
           <div className="progress-status">
-            <span className="status-dot" />
-            <span className="status-text">{currentAgentLabel}</span>
+            <div className="status-main">
+              <span className="status-dot" />
+              <span className="status-text">{currentAgentLabel}</span>
+            </div>
+
+            <div className="status-activity">
+              {progress?.totalToolCalls !== undefined && progress.totalToolCalls > 0 && (
+                <div className="tool-indicator" title="Tools used">
+                  <RefreshCw size={10} className="spinning" />
+                  <span>{progress.totalToolCalls}</span>
+                </div>
+              )}
+
+              {progress?.totalTokens !== undefined && progress.totalTokens > 0 && (
+                <div className="token-counter">
+                  <div className="token-stream">
+                    <div className={`token-particle ${progress.totalTokens % 3 === 0 ? 'active' : ''}`} />
+                    <div className={`token-particle ${progress.totalTokens % 3 === 1 ? 'active' : ''}`} />
+                    <div className={`token-particle ${progress.totalTokens % 3 === 2 ? 'active' : ''}`} />
+                  </div>
+                  <span>{progress.totalTokens.toLocaleString()} tokens</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

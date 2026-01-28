@@ -1,13 +1,15 @@
 import React, { useRef, useEffect } from 'react';
-import { ModelInfo } from '../types';
-import { Settings2 } from 'lucide-react';
+import { ModelInfo, DetailLevel } from '../types';
+import { Settings2, Sliders } from 'lucide-react';
 
 interface QueryBarProps {
   query: string;
   mode: 'fast' | 'smart';
+  detailLevel: DetailLevel;
   isProcessing: boolean;
   onQueryChange: (query: string) => void;
   onModeChange: (mode: 'fast' | 'smart') => void;
+  onDetailLevelChange: (detail: DetailLevel) => void;
   onSubmit: () => void;
   availableModels: ModelInfo[];
   selectedModel: string;
@@ -23,9 +25,11 @@ interface QueryBarProps {
 export const QueryBar: React.FC<QueryBarProps> = ({
   query,
   mode,
+  detailLevel,
   isProcessing,
   onQueryChange,
   onModeChange,
+  onDetailLevelChange,
   onSubmit,
   availableModels,
   selectedModel,
@@ -58,6 +62,14 @@ export const QueryBar: React.FC<QueryBarProps> = ({
       e.preventDefault();
       onSubmit();
     }
+  };
+
+  const detailLevels: DetailLevel[] = ['overview', 'low', 'medium', 'high', 'ultra'];
+  const currentDetailIndex = detailLevels.indexOf(detailLevel);
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fresh = detailLevels[parseInt(e.target.value)];
+    if (fresh) onDetailLevelChange(fresh);
   };
 
   return (
@@ -99,6 +111,22 @@ export const QueryBar: React.FC<QueryBarProps> = ({
         >
           <Settings2 size={16} />
         </button>
+
+        <div className="detail-slider-container" title={`Detail Level: ${detailLevel.toUpperCase()}`}>
+          <Sliders size={14} className="slider-icon" />
+          <input
+            type="range"
+            min="0"
+            max="4"
+            step="1"
+            value={currentDetailIndex}
+            onChange={handleSliderChange}
+            disabled={isProcessing}
+            className="detail-slider"
+          />
+          <span className="detail-label">{detailLevel === 'overview' ? 'Overview' : detailLevel.toUpperCase()}</span>
+        </div>
+
         <div className="mode-toggle">
           <button
             className={`mode-btn ${mode === 'fast' ? 'active' : ''}`}

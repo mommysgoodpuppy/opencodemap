@@ -168,6 +168,59 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+.detail-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border, #2b2b2b);
+  flex: 1;
+  min-width: 120px;
+}
+
+.slider-icon {
+  color: var(--vscode-descriptionForeground, #8b949e);
+  flex-shrink: 0;
+}
+
+.detail-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--vscode-scrollbarSlider-background, #424242);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.detail-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--vscode-button-background, #0e639c);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s ease-in-out;
+}
+
+.detail-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground, #8b949e);
+  min-width: 55px;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .submit-btn {
   padding: 4px 12px;
   font-size: 12px;
@@ -429,6 +482,82 @@ body {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #8b949e);
   overflow: hidden;
+  justify-content: space-between;
+}
+
+.status-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.status-activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tool-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  color: var(--vscode-notificationsInfoIcon-foreground, #75beff);
+  opacity: 0.9;
+  background: rgba(117, 190, 255, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.spinning {
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.token-counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--vscode-panel-border, #2b2b2b);
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  opacity: 0.8;
+  color: var(--vscode-progressBar-foreground, #0e70c0);
+}
+
+.token-stream {
+  display: flex;
+  gap: 3px;
+}
+
+.token-particle {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+  opacity: 0.2;
+  transform: scale(0.6);
+  transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.token-particle.active {
+  opacity: 1;
+  transform: scale(1.4);
+  filter: drop-shadow(0 0 2px var(--vscode-progressBar-foreground, #0e70c0));
 }
 
 .status-dot {

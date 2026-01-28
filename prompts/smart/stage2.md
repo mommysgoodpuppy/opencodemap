@@ -4,6 +4,8 @@ NOTE: Open files and cursor position may not be related to the user's current re
 The USER presented this request to you on {{ current_date }}.
 </additional_metadata>
 <user_request>
+{{ detail_instruction }}
+
 Now generate a codemap with the following object structure:
 
 {

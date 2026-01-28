@@ -1,3 +1,5 @@
+export type DetailLevel = 'overview' | 'low' | 'medium' | 'high' | 'ultra';
+
 /**
  * Shared types for Webview <-> Extension communication
  */
@@ -43,6 +45,7 @@ export interface Codemap {
   workspacePath?: string;
   query?: string;
   mode?: 'fast' | 'smart';
+  detailLevel?: DetailLevel;
   schemaVersion?: number;
   // Persisted Stage 1-2 shared context for retries
   stage12Context?: CodemapStage12ContextV1;
@@ -72,6 +75,8 @@ export interface ProgressState {
   completedStages: number;
   activeAgents: ActiveAgent[];
   currentPhase: string;
+  totalTokens?: number;
+  totalToolCalls?: number;
 }
 
 export interface ActiveAgent {
@@ -90,7 +95,7 @@ export interface ModelInfo {
 
 // Messages from Webview to Extension
 export type WebviewToExtensionMessage =
-  | { command: 'submit'; query: string; mode: 'fast' | 'smart' }
+  | { command: 'submit'; query: string; mode: 'fast' | 'smart'; detailLevel: DetailLevel }
   | { command: 'openFile'; path: string; line: number }
   | { command: 'ready' }
   | { command: 'refreshHistory' }
@@ -115,6 +120,7 @@ export type ExtensionToWebviewMessage =
       messages: AgentMessage[];
       isProcessing: boolean;
       mode: 'fast' | 'smart';
+      detailLevel: DetailLevel;
       suggestions: CodemapSuggestion[];
       history: CodemapHistoryItem[];
       progress?: ProgressState;

@@ -4,6 +4,8 @@
 
 import type { CodemapStage12ContextV1 } from './agent';
 
+export type DetailLevel = 'overview' | 'low' | 'medium' | 'high' | 'ultra';
+
 export interface CodemapLocation {
   id: string;
   path: string;
@@ -39,6 +41,7 @@ export interface Codemap {
   workspacePath?: string;
   query?: string;
   mode?: 'fast' | 'smart';
+  detailLevel?: DetailLevel;
   schemaVersion?: number;
   updatedAt?: string;
 }
