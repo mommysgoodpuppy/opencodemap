@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Trash2, RefreshCw, Circle } from 'lucide-react';
+import { X, Trash2, RefreshCw, Circle } from 'lucide-react';
 import type { Codemap, CodemapHistoryItem, ProgressState } from '../types';
 
 interface CodemapListProps {
@@ -115,7 +115,7 @@ export const CodemapList: React.FC<CodemapListProps> = ({
               title="Cancel Generation"
               style={{ color: 'var(--vscode-errorForeground)' }}
             >
-              <Trash2 size={14} />
+              <X size={14} />
             </button>
           </div>
 
