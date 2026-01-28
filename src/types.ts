@@ -29,6 +29,8 @@ export interface Codemap {
   description: string;
   traces: CodemapTrace[];
   mermaidDiagram?: string;
+  debugLogPath?: string;
+  metadata?: CodemapMetadata;
   /**
    * Persisted Stage 1-2 shared context for retrying later stages without re-running research.
    * Stored inside the same codemap JSON (no sidecar file).
@@ -44,6 +46,20 @@ export interface Codemap {
   detailLevel?: DetailLevel;
   schemaVersion?: number;
   updatedAt?: string;
+}
+
+export interface CodemapMetadata {
+  model?: string;
+  totalTokens?: number;
+  timeTakenMs?: number;
+  linesRead?: number;
+  filesRead?: string[];
+  repoId?: string;
+  git?: {
+    commit?: string;
+    branch?: string;
+    dirty?: boolean;
+  };
 }
 
 export interface CodemapSuggestion {

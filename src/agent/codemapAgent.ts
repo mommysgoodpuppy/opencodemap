@@ -12,7 +12,8 @@
  * - Smart: smart/system.md
  */
 
-import { generateText, CoreMessage } from 'ai';
+import { streamText, ModelMessage } from 'ai';
+import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon, loadMermaidPrompt } from '../prompts';
 import { allTools } from '../tools';
@@ -30,11 +31,13 @@ import {
   getUserOs,
 } from './utils';
 import { colorizeMermaidDiagram } from './mermaidColorize';
+import { validateMermaidDiagram } from './mermaidValidate';
 import * as logger from '../logger';
 
 export interface CodemapCallbacks {
   onMessage?: (role: string, content: string) => void;
   onToolCall?: (tool: string, args: string, result: string) => void;
+  onParallelToolState?: (activeCount: number) => void;
   onCodemapUpdate?: (codemap: Codemap) => void;
   onPhaseChange?: (phase: string, stageNumber: number) => void;
   onTraceProcessing?: (traceId: string, stage: number, status: 'start' | 'complete') => void;
@@ -44,7 +47,7 @@ export interface CodemapCallbacks {
    * the user wants persisted for retries.
    */
   onStage12ContextReady?: (context: CodemapStage12ContextV1) => void;
-  onToken?: () => void;
+  onToken?: (deltaText: string) => void;
 }
 
 export type CodemapMode = 'fast' | 'smart';
@@ -95,9 +98,277 @@ interface MermaidProcessingResult {
 
 function toCoreMessages(
   baseMessages: CodemapStage12ContextV1['baseMessages']
-): CoreMessage[] {
-  // `CoreMessage` supports richer shapes, but we only persist string content.
+): ModelMessage[] {
+  // ModelMessage supports richer shapes, but we only persist string content.
   return baseMessages.map((m) => ({ role: m.role, content: m.content }));
+}
+
+function logRequestPayload(stage: string, systemPrompt: string, messages: ModelMessage[]) {
+  logger.agentRaw(`[${stage}] SYSTEM PROMPT:\n${systemPrompt}`);
+  logger.agentRaw(`[${stage}] MESSAGES:\n${JSON.stringify(messages, null, 2)}`);
+}
+
+function normalizeToolArgs(args: unknown): unknown {
+  if (typeof args === 'string') {
+    try {
+      return JSON.parse(args);
+    } catch {
+      return args;
+    }
+  }
+  return args;
+}
+
+function toToolResultOutput(value: unknown): ToolResultOutput {
+  if (typeof value === 'string') {
+    return { type: 'text', value };
+  }
+  if (value === undefined) {
+    return { type: 'json', value: null };
+  }
+  try {
+    return { type: 'json', value: JSON.parse(JSON.stringify(value)) as any };
+  } catch {
+    return { type: 'text', value: String(value) };
+  }
+}
+
+async function runStreamedToolLoop(options: {
+  label: string;
+  systemPrompt: string;
+  messages: ModelMessage[];
+  tools?: Record<string, any>;
+  client: NonNullable<ReturnType<typeof getAIClient>>;
+  callbacks?: CodemapCallbacks;
+  abortSignal?: AbortSignal;
+  requireToolUse?: boolean;
+  maxRounds?: number;
+  maxOutputChars?: number;
+  maxParallelTools?: number;
+}): Promise<{ text?: string; usedTools: boolean }> {
+  const {
+    label,
+    systemPrompt,
+    messages,
+    tools,
+    client,
+    callbacks,
+    abortSignal,
+    requireToolUse = false,
+    maxRounds = 8,
+    maxOutputChars = 400000,
+    maxParallelTools = 4,
+  } = options;
+
+  let usedTools = false;
+  let noToolRounds = 0;
+  let totalChars = 0;
+  const seenToolCalls = new Map<string, string>();
+  let activeTools = 0;
+  const waitQueue: Array<() => void> = [];
+
+  const getListDirPath = (args: unknown): string | undefined => {
+    if (!args || typeof args !== 'object') {
+      return undefined;
+    }
+    const rec = args as Record<string, unknown>;
+    if (Array.isArray(rec.directories) && rec.directories.length === 1) {
+      const value = rec.directories[0];
+      return typeof value === 'string' ? value : undefined;
+    }
+    const value = rec.DirectoryPath ?? rec.directory_path ?? rec.path;
+    return typeof value === 'string' ? value : undefined;
+  };
+
+  for (let round = 1; round <= maxRounds; round++) {
+    if (abortSignal?.aborted) throw new Error('Generation cancelled');
+
+    logRequestPayload(`${label} Round ${round}`, systemPrompt, messages);
+    const modelStreamStart = Date.now();
+    let firstToolCallAt: number | null = null;
+    let firstTextAt: number | null = null;
+    const result = await streamText({
+      model: client(getModelName()),
+      system: systemPrompt,
+      messages,
+      tools: tools && Object.keys(tools).length > 0 ? tools : undefined,
+      toolChoice: requireToolUse ? 'required' : 'auto',
+      abortSignal,
+    });
+
+    let text = '';
+    const toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }> = [];
+    const pending: Array<Promise<{ toolCallId: string; message: ModelMessage }>> = [];
+    let sawToolCall = false;
+
+    const acquire = async () => new Promise<void>((resolve) => {
+      if (activeTools < maxParallelTools) {
+        activeTools += 1;
+        callbacks?.onParallelToolState?.(activeTools);
+        resolve();
+        return;
+      }
+      waitQueue.push(resolve);
+    });
+
+    const release = () => {
+      activeTools = Math.max(0, activeTools - 1);
+      callbacks?.onParallelToolState?.(activeTools);
+      const next = waitQueue.shift();
+      if (next) {
+        activeTools += 1;
+        callbacks?.onParallelToolState?.(activeTools);
+        next();
+      }
+    };
+
+    const runToolCall = async (call: { toolCallId: string; toolName: string; args: unknown }) => {
+      const tool = tools?.[call.toolName];
+      let resultValue: unknown;
+      const normalizedArgs = normalizeToolArgs(call.args);
+      const toolKey = `${call.toolName}:${JSON.stringify(normalizedArgs)}`;
+
+      if (call.toolName === 'list_dir' && seenToolCalls.has(toolKey)) {
+        const listPath = getListDirPath(normalizedArgs);
+        resultValue = listPath
+          ? `Skipped list_dir: already listed ${listPath}. Use grep_search or read_file.`
+          : 'Skipped list_dir: already listed those directories. Use grep_search or read_file.';
+      }
+
+      if (resultValue === undefined && (!tool || typeof tool.execute !== 'function')) {
+        resultValue = `Error: Tool not found: ${call.toolName}`;
+      } else if (resultValue === undefined) {
+        try {
+          const toolStart = Date.now();
+          resultValue = await tool.execute(normalizedArgs);
+          const toolDuration = Date.now() - toolStart;
+          logger.info(`[${label}] Tool ${call.toolName} completed in ${toolDuration}ms`);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          resultValue = `Error executing tool "${call.toolName}": ${errorMsg}`;
+        }
+      }
+      if (!seenToolCalls.has(toolKey)) {
+        seenToolCalls.set(toolKey, call.toolName);
+      }
+
+      const argsText = typeof normalizedArgs === 'string'
+        ? normalizedArgs
+        : JSON.stringify(normalizedArgs, null, 2);
+      const resultText = typeof resultValue === 'string'
+        ? resultValue
+        : JSON.stringify(resultValue, null, 2);
+      callbacks?.onToolCall?.(call.toolName, argsText, resultText.slice(0, 500));
+
+      return {
+        role: 'tool' as const,
+        content: [{
+          type: 'tool-result' as const,
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          output: toToolResultOutput(resultValue),
+        }],
+      };
+    };
+
+    for await (const part of result.fullStream) {
+      if (abortSignal?.aborted) throw new Error('Generation cancelled');
+      if (part.type === 'text-delta') {
+        if (sawToolCall) {
+          // If the model starts emitting text after tool calls, stop early.
+          break;
+        }
+        if (!firstTextAt) {
+          firstTextAt = Date.now();
+        }
+        text += part.text;
+        totalChars += part.text.length;
+        callbacks?.onToken?.(part.text);
+      } else if (part.type === 'tool-call') {
+        sawToolCall = true;
+        if (!firstToolCallAt) {
+          firstToolCallAt = Date.now();
+        }
+        const maybeBatch = part.input && typeof part.input === 'object'
+          ? (part.input as { toolCalls?: Array<{ toolName: string; args?: unknown }> }).toolCalls
+          : undefined;
+        const emittedCalls = Array.isArray(maybeBatch)
+          ? maybeBatch.map((c, idx) => ({
+              toolCallId: `${part.toolCallId}:${idx}`,
+              toolName: c.toolName,
+              args: c.args ?? {},
+            }))
+          : [{
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              args: part.input,
+            }];
+        for (const call of emittedCalls) {
+          toolCalls.push(call);
+          const promise = (async () => {
+            await acquire();
+            try {
+              const message = await runToolCall(call);
+              return { toolCallId: call.toolCallId, message };
+            } finally {
+              release();
+            }
+          })();
+          pending.push(promise);
+        }
+      }
+      if (totalChars > maxOutputChars) {
+        throw new Error(`Output budget reached (${maxOutputChars} chars) in ${label}`);
+      }
+    }
+    const modelStreamEnd = Date.now();
+    const modelStreamMs = modelStreamEnd - modelStreamStart;
+    const toolDelayMs = firstToolCallAt ? firstToolCallAt - modelStreamStart : null;
+    const textDelayMs = firstTextAt ? firstTextAt - modelStreamStart : null;
+    const delayInfo = [
+      toolDelayMs !== null ? `firstToolCall=${toolDelayMs}ms` : null,
+      textDelayMs !== null ? `firstText=${textDelayMs}ms` : null,
+    ].filter(Boolean).join(', ');
+    logger.info(
+      `[${label} Round ${round}] Model stream completed in ${modelStreamMs}ms` +
+        (delayInfo ? ` (${delayInfo})` : '')
+    );
+
+    if (text.length > 0) {
+      messages.push({ role: 'assistant', content: text });
+      callbacks?.onMessage?.('assistant', text);
+    }
+
+    if (toolCalls.length === 0) {
+      if (requireToolUse && !usedTools) {
+        noToolRounds++;
+        messages.push({
+          role: 'system',
+          content:
+            'You must use the provided tools. Do not describe tool calls in text. Emit actual tool calls using the tool calling mechanism.',
+        });
+        if (noToolRounds < 3) {
+          continue;
+        }
+      }
+      return { text, usedTools };
+    }
+
+    usedTools = true;
+    const resolved = await Promise.all(pending);
+    const messageById = new Map<string, ModelMessage>();
+    for (const entry of resolved) {
+      messageById.set(entry.toolCallId, entry.message);
+    }
+    for (const call of toolCalls) {
+      const message = messageById.get(call.toolCallId);
+      if (message) {
+        messages.push(message);
+      }
+    }
+  }
+
+  return { text: undefined, usedTools };
 }
 
 /**
@@ -106,7 +377,7 @@ function toCoreMessages(
 async function processTraceStages(
   traceId: string,
   systemPrompt: string,
-  baseMessages: CoreMessage[],
+  baseMessages: ModelMessage[],
   currentDate: string,
   language: string,
   callbacks: CodemapCallbacks = {},
@@ -115,7 +386,7 @@ async function processTraceStages(
   const stagesDescription = options.includeGuide ? 'stages 3-5' : 'stages 3-4';
   const client = getAIClient({ onToken: callbacks.onToken })!;
 
-  const messages: CoreMessage[] = [...baseMessages];
+  const messages: ModelMessage[] = [...baseMessages];
   let diagram: string | undefined;
   let guide: string | undefined;
 
@@ -130,17 +401,19 @@ async function processTraceStages(
     if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
 
     logger.info(`[Trace ${traceId}] Stage 3: Calling API...`);
-    const stage3Result = await generateText({
-      model: client(getModelName()),
-      system: systemPrompt,
+    const stage3Result = await runStreamedToolLoop({
+      label: `Trace ${traceId} Stage 3`,
+      systemPrompt,
       messages,
+      client,
+      callbacks,
       abortSignal: options.abortSignal,
+      maxParallelTools: 4,
     });
     logger.info(`[Trace ${traceId}] Stage 3: API response received, text length: ${stage3Result.text?.length || 0}`);
 
     if (stage3Result.text) {
       logger.agentRaw(`[Trace ${traceId} Stage 3] RESPONSE:\n${stage3Result.text}`);
-      messages.push({ role: 'assistant', content: stage3Result.text });
       callbacks.onMessage?.('assistant', `[Trace ${traceId} Stage 3] Generated initial diagram`);
     } else {
       logger.warn(`[Trace ${traceId}] Stage 3: No text in response`);
@@ -157,17 +430,19 @@ async function processTraceStages(
     if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
 
     logger.info(`[Trace ${traceId}] Stage 4: Calling API...`);
-    const stage4Result = await generateText({
-      model: client(getModelName()),
-      system: systemPrompt,
+    const stage4Result = await runStreamedToolLoop({
+      label: `Trace ${traceId} Stage 4`,
+      systemPrompt,
       messages,
+      client,
+      callbacks,
       abortSignal: options.abortSignal,
+      maxParallelTools: 4,
     });
     logger.info(`[Trace ${traceId}] Stage 4: API response received, text length: ${stage4Result.text?.length || 0}`);
 
     if (stage4Result.text) {
       logger.agentRaw(`[Trace ${traceId} Stage 4] RESPONSE:\n${stage4Result.text}`);
-      messages.push({ role: 'assistant', content: stage4Result.text });
       diagram = extractTraceDiagram(stage4Result.text) || undefined;
       logger.info(`[Trace ${traceId}] Stage 4: Diagram extracted: ${diagram ? 'YES' : 'NO'}`);
       if (diagram) {
@@ -190,11 +465,14 @@ async function processTraceStages(
       if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
 
       logger.info(`[Trace ${traceId}] Stage 5: Calling API...`);
-      const stage5Result = await generateText({
-        model: client(getModelName()),
-        system: systemPrompt,
+      const stage5Result = await runStreamedToolLoop({
+        label: `Trace ${traceId} Stage 5`,
+        systemPrompt,
         messages,
+        client,
+        callbacks,
         abortSignal: options.abortSignal,
+        maxParallelTools: 4,
       });
       logger.info(`[Trace ${traceId}] Stage 5: API response received, text length: ${stage5Result.text?.length || 0}`);
 
@@ -235,7 +513,7 @@ async function processTraceStages(
  */
 async function processMermaidDiagram(
   systemPrompt: string,
-  baseMessages: CoreMessage[],
+  baseMessages: ModelMessage[],
   currentDate: string,
   language: string,
   callbacks: CodemapCallbacks = {},
@@ -245,41 +523,76 @@ async function processMermaidDiagram(
 
   const client = getAIClient({ onToken: callbacks.onToken })!;
 
-  const messages: CoreMessage[] = [...baseMessages];
+  const messages: ModelMessage[] = [...baseMessages];
+  const maxAttempts = 8;
+  let lastError: string | null = null;
+  let lastDiagram: string | undefined;
 
   try {
     callbacks.onPhaseChange?.('Mermaid Diagram', 6);
-    const mermaidPrompt = loadMermaidPrompt({ current_date: currentDate, language });
-    logger.debug(`[Mermaid] Prompt length: ${mermaidPrompt.length}`);
-    messages.push({ role: 'user', content: mermaidPrompt });
-    callbacks.onMessage?.('user', '[Mermaid] Generating global mermaid diagram...');
 
-    if (abortSignal?.aborted) throw new Error('Generation cancelled');
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const isFirstAttempt = attempt === 1;
+      const prompt = isFirstAttempt
+        ? loadMermaidPrompt({ current_date: currentDate, language })
+        : buildMermaidFixPrompt(lastError ?? 'Unknown parse error', lastDiagram ?? '');
 
-    logger.info('[Mermaid] Calling API...');
-    const mermaidResult = await generateText({
-      model: client(getModelName()),
-      system: systemPrompt,
-      messages,
-      abortSignal,
-    });
-    logger.info(`[Mermaid] API response received, text length: ${mermaidResult.text?.length || 0}`);
+      logger.debug(`[Mermaid] Prompt length (attempt ${attempt}/${maxAttempts}): ${prompt.length}`);
+      messages.push({ role: 'user', content: prompt });
+      callbacks.onMessage?.(
+        'user',
+        isFirstAttempt
+          ? '[Mermaid] Generating global mermaid diagram...'
+          : `[Mermaid] Fixing diagram (attempt ${attempt}/${maxAttempts})...`
+      );
 
-    if (!mermaidResult.text) {
-      logger.warn('[Mermaid] No text in response');
-      return { error: 'No text in mermaid response' };
-    }
+      if (abortSignal?.aborted) throw new Error('Generation cancelled');
 
-    logger.agentRaw(`[Mermaid Stage 6] RESPONSE:\n${mermaidResult.text}`);
+      logger.info(`[Mermaid] Calling API (attempt ${attempt}/${maxAttempts})...`);
+      const mermaidResult = await runStreamedToolLoop({
+        label: `[Mermaid] Attempt ${attempt}`,
+        systemPrompt,
+        messages,
+        client,
+        callbacks,
+        abortSignal,
+        maxRounds: 1,
+        maxParallelTools: 4,
+      });
+      logger.info(`[Mermaid] API response received, text length: ${mermaidResult.text?.length || 0}`);
 
-    const extracted = extractMermaidDiagram(mermaidResult.text) || undefined;
-    const diagram = extracted ? colorizeMermaidDiagram(extracted) : undefined;
-    callbacks.onMessage?.('assistant', '[Mermaid] Mermaid diagram generated');
-    logger.info(`[Mermaid] Diagram extracted: ${diagram ? 'YES' : 'NO'}`);
-    if (diagram) {
+      if (!mermaidResult.text) {
+        logger.warn('[Mermaid] No text in response');
+        lastError = 'No text in mermaid response';
+        continue;
+      }
+
+      logger.agentRaw(`[Mermaid Stage 6 Attempt ${attempt}] RESPONSE:\n${mermaidResult.text}`);
+
+      const extracted = extractMermaidDiagram(mermaidResult.text) || undefined;
+      if (!extracted) {
+        lastError = 'No mermaid code block found in response';
+        logger.warn(`[Mermaid] ${lastError}`);
+        continue;
+      }
+
+      const validation = await validateMermaidDiagram(extracted);
+      if (!validation.ok) {
+        lastError = validation.error || 'Mermaid parse error';
+        lastDiagram = extracted;
+        callbacks.onMessage?.('error', `[Mermaid] Parse error: ${lastError}`);
+        logger.warn(`[Mermaid] Parse error on attempt ${attempt}: ${lastError}`);
+        continue;
+      }
+
+      const diagram = colorizeMermaidDiagram(extracted);
+      callbacks.onMessage?.('assistant', '[Mermaid] Mermaid diagram generated');
+      logger.info(`[Mermaid] Diagram extracted: YES (attempt ${attempt})`);
       logger.debug(`[Mermaid] Diagram length: ${diagram.length}`);
+      return { diagram };
     }
-    return { diagram };
+
+    return { error: `Mermaid diagram failed to compile after ${maxAttempts} attempts: ${lastError || 'Unknown error'}` };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (abortSignal?.aborted || errorMsg.includes('cancelled') || errorMsg.includes('aborted')) {
@@ -289,6 +602,26 @@ async function processMermaidDiagram(
     logger.error(`[Mermaid] Error during mermaid generation: ${errorMsg}`);
     return { error: errorMsg };
   }
+}
+
+function buildMermaidFixPrompt(errorMessage: string, diagram: string): string {
+  const hasDiagram = diagram.trim().length > 0;
+  return (
+    `The Mermaid diagram you produced failed to parse. Fix it so it compiles.\n\n` +
+    `Requirements:\n` +
+    `- Output ONLY a single \`\`\`mermaid code block, no other text.\n` +
+    `- Do not include XML tags or analysis text (e.g., <thinking>, <BRAINSTORMING>).\n` +
+    `- Keep the diagram structure and labels, change only what is needed to fix parsing.\n` +
+    `- Avoid reserved keywords as node IDs: end, subgraph, graph, flowchart.\n` +
+    `- For subgraphs, use explicit IDs like: subgraph id [Label].\n\n` +
+    `Parse error:\n${errorMessage}\n\n` +
+    (hasDiagram
+      ? `Current diagram:\n` +
+        '```mermaid\n' +
+        `${diagram}\n` +
+        '```\n'
+      : `No valid diagram was extracted. Generate a fresh, valid Mermaid diagram using the existing context.\n`)
+  );
 }
 
 /**
@@ -351,8 +684,9 @@ export async function generateCodemap(
     language,
   });
   logger.debug(`System prompt length: ${systemPrompt.length}`);
+  logger.agentRaw(`[System Prompt] ${mode.toUpperCase()} MODE:\n${systemPrompt}`);
 
-  const messages: CoreMessage[] = [];
+  const messages: ModelMessage[] = [];
   let resultCodemap: Codemap | null = null;
   let mermaidPromise: Promise<MermaidProcessingResult | null> | null = null;
   
@@ -373,83 +707,35 @@ export async function generateCodemap(
     messages.push({ role: 'user', content: stage1Prompt });
     callbacks.onMessage?.('user', `[Stage 1] Research query: ${query}`);
 
-    let researchComplete = false;
-    let researchIteration = 0;
+    const vsCodeTools = extensionContext ? getSelectedVsCodeTools(extensionContext) : {};
+    const dynamicTools = { ...allTools, ...vsCodeTools };
 
-    while (!researchComplete) {
-      researchIteration++;
-      logger.info(`Stage 1 - Research iteration ${researchIteration}`);
-      logger.info(`Stage 1 - Calling API with ${messages.length} messages...`);
-      
-      if (abortSignal?.aborted) throw new Error('Generation cancelled');
-
-      const vsCodeTools = extensionContext ? getSelectedVsCodeTools(extensionContext) : {};
-      const dynamicTools = { ...allTools, ...vsCodeTools };
-
-      const result = await generateText({
-        model: client(getModelName()),
-        system: systemPrompt,
-        messages,
-        tools: dynamicTools,
-        abortSignal,
-        onStepFinish: (step) => {
-          logger.debug(`Stage 1 - Step finished: text=${!!step.text}, toolCalls=${step.toolCalls?.length || 0}`);
-          
-          if (step.text) {
-            callbacks.onMessage?.('assistant', step.text);
-            if (isResearchComplete(step.text)) {
-              logger.info('Stage 1 - Research completion detected in step');
-              researchComplete = true;
-            }
-          }
-
-          if (step.toolCalls) {
-            for (const tc of step.toolCalls) {
-              logger.info(`Stage 1 - Tool call: ${tc.toolName}`);
-              logger.debug(`Stage 1 - Tool args: ${JSON.stringify(tc.args)}`);
-              
-              const toolResult = step.toolResults?.find(
-                (r: { toolCallId: string }) => r.toolCallId === tc.toolCallId
-              );
-              if (toolResult) {
-                logger.debug(`Stage 1 - Tool result length: ${String(toolResult.result).length}`);
-                logger.agentRaw(`[Stage 1 Research] TOOL CALL: ${tc.toolName}(${JSON.stringify(tc.args)})\nRESULT: ${String(toolResult.result).slice(0, 1000)}${String(toolResult.result).length > 1000 ? '...' : ''}`);
-              }
-              callbacks.onToolCall?.(
-                tc.toolName,
-                JSON.stringify(tc.args, null, 2),
-                toolResult ? String(toolResult.result).slice(0, 500) : ''
-              );
-            }
-          }
-        },
-      });
-
-      logger.info(`Stage 1 - API response received: steps=${result.steps.length}, text=${!!result.text}`);
-      
-      if (result.text) {
-        logger.agentRaw(`[Stage 1 Research] RESPONSE Iteration ${researchIteration}:\n${result.text}`);
-        logger.debug(`Stage 1 - Response text length: ${result.text.length}`);
-        messages.push({ role: 'assistant', content: result.text });
-        if (isResearchComplete(result.text)) {
-          logger.info('Stage 1 - Research completion detected in final result');
-          researchComplete = true;
-        }
+    logger.info('Stage 1 - Calling API with streaming tool loop...');
+    const stage1Result = await runStreamedToolLoop({
+      label: 'Stage 1 Research',
+      systemPrompt,
+      messages,
+      tools: dynamicTools,
+      client,
+      callbacks,
+      abortSignal,
+      requireToolUse: true,
+      maxRounds: 12,
+      maxParallelTools: mode === 'fast' ? 6 : 4,
+    });
+    if (stage1Result.text) {
+      logger.agentRaw(`[Stage 1 Research] RESPONSE:\n${stage1Result.text}`);
+      logger.debug(`Stage 1 - Response text length: ${stage1Result.text.length}`);
+      if (!isResearchComplete(stage1Result.text)) {
+        logger.warn('Stage 1 - Research did not emit completion marker');
       }
-      
-      // If model didn't use any tools and gave a response, it's done researching
-      if (result.steps.length === 1 && !result.steps[0].toolCalls?.length) {
-        logger.info('Stage 1 - No tool calls in response, ending research');
-        break;
-      }
-      
-      // Safety check to prevent infinite loops
-      if (researchIteration > 20) {
-        logger.warn('Stage 1 - Max research iterations reached, breaking loop');
-        break;
-      }
+    } else {
+      logger.warn('Stage 1 - No text in response');
     }
-    logger.info(`Stage 1 - Research complete after ${researchIteration} iterations`);
+    if (!stage1Result.usedTools) {
+      throw new Error('Stage 1 failed to use tools; aborting before Stage 2');
+    }
+    logger.info('Stage 1 - Research complete');
 
     // ========== Stage 2: Generate Codemap Structure ==========
     logger.separator('STAGE 2: CODEMAP STRUCTURE');
@@ -468,19 +754,21 @@ export async function generateCodemap(
     if (abortSignal?.aborted) throw new Error('Generation cancelled');
 
     logger.info('Stage 2 - Calling API...');
-    const stage2Result = await generateText({
-      model: client(getModelName()),
-      system: systemPrompt,
+    const stage2Result = await runStreamedToolLoop({
+      label: 'Stage 2 Structure',
+      systemPrompt,
       messages,
+      client,
+      callbacks,
       abortSignal,
+      maxRounds: 1,
+      maxParallelTools: mode === 'fast' ? 6 : 4,
     });
     logger.info(`Stage 2 - API response received: text=${!!stage2Result.text}`);
 
     if (stage2Result.text) {
       logger.agentRaw(`[Stage 2 Structure] RESPONSE:\n${stage2Result.text}`);
       logger.debug(`Stage 2 - Response text length: ${stage2Result.text.length}`);
-      messages.push({ role: 'assistant', content: stage2Result.text });
-      callbacks.onMessage?.('assistant', stage2Result.text);
       
       logger.info('Stage 2 - Extracting codemap from response...');
       const extracted = extractCodemapFromResponse(stage2Result.text);
@@ -594,6 +882,7 @@ export async function generateCodemap(
         if (mermaidResult.error) {
           logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
           callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
+          throw new Error(`Mermaid diagram failed to compile: ${mermaidResult.error}`);
         } else if (mermaidResult.diagram) {
           resultCodemap.mermaidDiagram = mermaidResult.diagram;
           logger.info(`[Mermaid] Diagram stored (${mermaidResult.diagram.length} chars)`);
@@ -616,6 +905,7 @@ export async function generateCodemap(
           } else if (mermaidResult?.error) {
             logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
             callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
+            throw new Error(`Mermaid diagram failed to compile: ${mermaidResult.error}`);
           }
         }
       }
@@ -746,7 +1036,7 @@ export async function generateMermaidFromCodemapSnapshot(
       2
     );
 
-    const baseMessages: CoreMessage[] = [
+    const baseMessages: ModelMessage[] = [
       {
         role: 'user',
         content:

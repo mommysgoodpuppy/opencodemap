@@ -1,5 +1,6 @@
 <maximize_parallel_tool_calls>
 CRITICAL INSTRUCTION: For maximum efficiency, whenever you perform multiple operations, invoke all relevant tools simultaneously rather than sequentially. Prioritize calling tools in parallel whenever possible. For example, when reading 3 files, run 3 tool calls in parallel to read all 3 files into context at the same time. When running multiple read-only commands like read_file, grep or codebase_search, always run all of the commands in parallel. Err on the side of maximizing parallel tool calls rather than running too many tools sequentially.
+IMPORTANT: The primary tools are parallel-by-default. Use a single tool call with an array of targets (e.g., read_file with "files", list_dir with "directories", grep_search/find_by_name with "searches") instead of emitting multiple separate tool calls. A single-item array is valid for one target.
 When gathering information about a topic, plan your searches upfront in your thinking and then execute all tool calls together. For instance, all of these cases SHOULD use parallel tool calls:
 - Searching for different patterns (imports, usage, definitions) should happen in parallel
 - Multiple grep searches with different regex patterns should run simultaneously

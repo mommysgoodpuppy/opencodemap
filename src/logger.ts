@@ -4,9 +4,11 @@
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 let outputChannel: vscode.OutputChannel | null = null;
 let agentOutputChannel: vscode.OutputChannel | null = null;
+let captureEntries: string[] | null = null;
 
 /**
  * Initialize the logger with a VSCode Output Channel
@@ -63,6 +65,9 @@ export function log(level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', message: string,
   }
   
   outputChannel!.appendLine(fullMessage);
+  if (captureEntries) {
+    captureEntries.push(fullMessage);
+  }
   
   // Also log to console for development
   if (level === 'ERROR') {
@@ -112,6 +117,9 @@ export function agentRaw(message: string): void {
   
   const timestamp = new Date().toISOString();
   agentOutputChannel!.appendLine(`[${timestamp}] ${message}`);
+  if (captureEntries) {
+    captureEntries.push(`[${timestamp}] [RAW] ${message}`);
+  }
 }
 
 /**
@@ -153,6 +161,51 @@ export function separator(title?: string): void {
     outputChannel?.appendLine(`\n${'='.repeat(20)} ${title} ${'='.repeat(20)}`);
   } else {
     outputChannel?.appendLine('='.repeat(60));
+  }
+}
+
+/**
+ * Start capturing logs into an in-memory buffer.
+ */
+export function startCapture(label?: string): void {
+  captureEntries = [];
+  if (label) {
+    const timestamp = new Date().toISOString();
+    captureEntries.push(`[${timestamp}] [CAPTURE] ${label}`);
+  }
+}
+
+/**
+ * Stop capturing and return the captured log content.
+ */
+export function endCapture(): string | null {
+  if (!captureEntries) {
+    return null;
+  }
+  const content = captureEntries.join('\n');
+  captureEntries = null;
+  return content;
+}
+
+/**
+ * Snapshot current capture buffer without clearing it.
+ */
+export function snapshotCapture(): string | null {
+  if (!captureEntries) {
+    return null;
+  }
+  return captureEntries.join('\n');
+}
+
+/**
+ * Write a captured log string to disk.
+ */
+export function writeCaptureToFile(filePath: string, content: string): boolean {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return true;
+  } catch {
+    return false;
   }
 }
 

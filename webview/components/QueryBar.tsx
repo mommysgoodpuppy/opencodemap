@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { ModelInfo, DetailLevel } from '../types';
-import { Settings2, Sliders } from 'lucide-react';
+import { Settings2, Sliders, FileSpreadsheet } from 'lucide-react';
 
 interface QueryBarProps {
   query: string;
@@ -16,6 +16,7 @@ interface QueryBarProps {
   onSelectModel: (modelId: string) => void;
   onCancel: () => void;
   onPickTools: () => void;
+  onOpenDebugLog: () => void;
 }
 
 /**
@@ -36,6 +37,7 @@ export const QueryBar: React.FC<QueryBarProps> = ({
   onSelectModel,
   onCancel,
   onPickTools,
+  onOpenDebugLog,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -110,6 +112,13 @@ export const QueryBar: React.FC<QueryBarProps> = ({
           disabled={isProcessing}
         >
           <Settings2 size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          onClick={onOpenDebugLog}
+          title="Open debug log"
+        >
+          <FileSpreadsheet size={16} />
         </button>
 
         <div className="detail-slider-container" title={`Detail Level: ${detailLevel.toUpperCase()}`}>

@@ -3,20 +3,20 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
-import { LanguageModelV1 } from 'ai';
+import { LanguageModel } from 'ai';
 import * as vscode from 'vscode';
 import { createVSCodeLM } from './vscodeLM';
 
-let cachedClient: ((modelName: string) => LanguageModelV1) | null = null;
+let cachedClient: ((modelName: string) => LanguageModel) | null = null;
 let cachedConfig: { provider: string; apiKey: string; baseUrl: string } | null = null;
 
-export function getAIClient(callbacks?: { onToken?: () => void }): ((modelName: string) => LanguageModelV1) | null {
+export function getAIClient(_callbacks?: { onToken?: (deltaText: string) => void }): ((modelName: string) => LanguageModel) | null {
   const config = vscode.workspace.getConfiguration('codemap');
   const provider = config.get<string>('provider') || 'openai';
   const apiKey = config.get<string>('openaiApiKey') || '';
   const baseUrl = config.get<string>('openaiBaseUrl') || 'https://api.openai.com/v1';
 
-  let clientFactory: (modelName: string) => LanguageModelV1;
+  let clientFactory: (modelName: string) => LanguageModel;
 
   if (provider === 'vscode') {
     clientFactory = (modelName: string) => {
@@ -42,86 +42,10 @@ export function getAIClient(callbacks?: { onToken?: () => void }): ((modelName: 
       apiKey,
       baseURL: baseUrl,
     });
-    clientFactory = (modelName: string) => openai(modelName) as LanguageModelV1;
+    clientFactory = (modelName: string) => openai(modelName) as LanguageModel;
   }
 
-  // Wrap the client to support onToken callback if provided
-  return (modelName: string) => {
-    const model = clientFactory(modelName);
-    if (!callbacks?.onToken) {
-      return model;
-    }
-
-    const onToken = callbacks.onToken;
-    return {
-      ...model,
-      async doGenerate(options) {
-        const streamResult = await model.doStream(options);
-        const reader = streamResult.stream.getReader();
-
-        let text = '';
-        const toolCalls: any[] = [];
-        let finishReason: any = 'stop';
-        let usage = { promptTokens: 0, completionTokens: 0 };
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            if (value.type === 'text-delta') {
-              text += value.textDelta;
-              onToken();
-            } else if (value.type === 'tool-call') {
-              toolCalls.push(value);
-              onToken();
-            } else if (value.type === 'finish') {
-              finishReason = value.finishReason;
-              if (value.usage) {
-                usage = value.usage;
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-
-        return {
-          text: text || undefined,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          finishReason,
-          usage,
-          rawCall: streamResult.rawCall,
-        };
-      },
-      async doStream(options) {
-        const streamResult = await model.doStream(options);
-        return {
-          ...streamResult,
-          stream: new ReadableStream({
-            async start(controller) {
-              const reader = streamResult.stream.getReader();
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  if (value.type === 'text-delta' || value.type === 'tool-call-delta' || value.type === 'tool-call') {
-                    onToken();
-                  }
-                  controller.enqueue(value);
-                }
-              } catch (err) {
-                controller.error(err);
-              } finally {
-                controller.close();
-                reader.releaseLock();
-              }
-            }
-          })
-        };
-      }
-    } as LanguageModelV1;
-  };
+  return (modelName: string) => clientFactory(modelName);
 }
 
 export function getModelName(): string {

@@ -14,7 +14,7 @@ export function wrapVsCodeTool(info: vscode.LanguageModelToolInformation) {
     // Note: AI SDK 'tool' usually wants a Zod schema for 'parameters'.
     // If we don't have a Zod schema, we can use z.any() and validate manually, 
     // or just pass the schema if the library supports it.
-    parameters: z.any().describe(JSON.stringify(info.inputSchema)),
+    inputSchema: z.any().describe(JSON.stringify(info.inputSchema)),
     execute: async (input) => {
       try {
         const result = await vscode.lm.invokeTool(

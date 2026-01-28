@@ -33,7 +33,7 @@ export async function generateSuggestions(
     const result = await generateText({
       model: client(getModelName()),
       prompt: userPrompt,
-      maxTokens: 500,
+      maxOutputTokens: 500,
     });
 
     logger.agentRaw(`[Suggestions] RESPONSE:\n${result.text}`);

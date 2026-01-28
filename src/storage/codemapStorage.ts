@@ -70,6 +70,16 @@ function generateCodemapFilename(codemap: Codemap): string {
   return `${timestamp}_${titleSlug}.json`;
 }
 
+function generateDebugLogFilename(label: string): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50) || 'codemap';
+  return `${timestamp}_${slug}.debug.log`;
+}
+
 /**
  * Save a codemap to storage
  */
@@ -177,4 +187,15 @@ export function getStoragePath(): string {
 export function getCodemapFilePath(filename: string): string {
   const storageDir = getCodemapStorageDir();
   return path.join(storageDir, filename);
+}
+
+/**
+ * Save a debug log to storage and return the full file path.
+ */
+export function saveDebugLog(content: string, label: string = 'codemap'): string {
+  const storageDir = getCodemapStorageDir();
+  const filename = generateDebugLogFilename(label);
+  const filePath = path.join(storageDir, filename);
+  fs.writeFileSync(filePath, content, 'utf-8');
+  return filePath;
 }

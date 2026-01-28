@@ -141,14 +141,16 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^1.0.0",
-    "ai": "^4.0.0",
+    "@ai-sdk/openai": "^3.0.21",
+    "@ai-sdk/provider-utils": "^4.0.10",
+    "ai": "^6.0.58",
+    "ignore": "^7.0.5",
     "lucide-react": "^0.511.0",
     "mermaid": "^11.12.2",
-    "svg-pan-zoom": "^3.6.1",
     "react": "^19.2.1",
     "react-arborist": "^3.4.3",
     "react-dom": "^19.2.1",
+    "svg-pan-zoom": "^3.6.1",
     "zod": "^3.23.0"
   },
   "devDependencies": {

@@ -1,6 +1,35 @@
 import * as vscode from 'vscode';
-import { generateText, streamText, CoreMessage, LanguageModelV1 } from 'ai';
+import { streamText, ModelMessage, LanguageModel } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
+import type { ToolResultOutput } from '@ai-sdk/provider-utils';
+
+function toToolResultOutput(value: unknown): ToolResultOutput {
+    if (typeof value === 'string') {
+        return { type: 'text', value };
+    }
+    if (value === undefined) {
+        return { type: 'json', value: null };
+    }
+    try {
+        return { type: 'json', value: JSON.parse(JSON.stringify(value)) };
+    } catch {
+        return { type: 'text', value: String(value) };
+    }
+}
+
+function coerceToolInput(input: unknown): object {
+    if (input && typeof input === 'object') return input as object;
+    if (typeof input === 'string') {
+        try {
+            const parsed = JSON.parse(input);
+            if (parsed && typeof parsed === 'object') return parsed as object;
+            return { value: parsed };
+        } catch {
+            return { value: input };
+        }
+    }
+    return { value: input };
+}
 
 export class CodemapChatModelProvider implements vscode.LanguageModelChatProvider {
     async provideLanguageModelChatInformation(
@@ -47,7 +76,7 @@ export class CodemapChatModelProvider implements vscode.LanguageModelChatProvide
             baseURL: baseUrl,
         });
 
-        const coreMessages: CoreMessage[] = messages.map(msg => {
+        const coreMessages: ModelMessage[] = messages.map(msg => {
             const role = msg.role === vscode.LanguageModelChatMessageRole.User ? 'user' : 'assistant';
             
             // Map complex content parts (text, tool results, tool calls)
@@ -57,15 +86,17 @@ export class CodemapChatModelProvider implements vscode.LanguageModelChatProvide
                         return { type: 'text', text: part.value };
                     }
                     if (part instanceof vscode.LanguageModelToolResultPart) {
-                        return { type: 'tool-result', toolCallId: part.callId, result: part.content };
+                        const contentParts = part.content as vscode.LanguageModelTextPart[];
+                        const contentText = contentParts.map(p => p.value).join('');
+                        return { type: 'tool-result', toolCallId: part.callId, toolName: 'tool', output: toToolResultOutput(contentText) };
                     }
                     if (part instanceof vscode.LanguageModelToolCallPart) {
-                        return { type: 'tool-call', toolCallId: part.callId, toolName: part.name, args: part.input };
+                        return { type: 'tool-call', toolCallId: part.callId, toolName: part.name, input: JSON.stringify(part.input) };
                     }
                     return null;
                 }).filter(p => p !== null);
                 
-                return { role, content } as CoreMessage;
+                return { role, content } as ModelMessage;
             }
 
             // Simple text content
@@ -80,20 +111,10 @@ export class CodemapChatModelProvider implements vscode.LanguageModelChatProvide
 
         // Convert VS Code tools to AI SDK tools
         const tools: Record<string, any> = {};
-        if (options.tools) {
-            options.tools.forEach(t => {
-                // We create "intent-only" tools that don't execute, 
-                // we just want AI SDK to recognize them.
-                tools[t.name] = {
-                    description: t.description,
-                    parameters: t.inputSchema as any,
-                };
-            });
-        }
 
         try {
             const { fullStream } = await streamText({
-                model: openai(modelName) as LanguageModelV1,
+                model: openai(modelName) as LanguageModel,
                 messages: coreMessages,
                 tools: Object.keys(tools).length > 0 ? tools : undefined,
                 abortSignal: (token as any).signal,
@@ -103,12 +124,12 @@ export class CodemapChatModelProvider implements vscode.LanguageModelChatProvide
                 if (token.isCancellationRequested) break;
 
                 if (part.type === 'text-delta') {
-                    progress.report(new vscode.LanguageModelTextPart(part.textDelta));
+                    progress.report(new vscode.LanguageModelTextPart(part.text));
                 } else if (part.type === 'tool-call') {
                     progress.report(new vscode.LanguageModelToolCallPart(
                         part.toolCallId,
                         part.toolName,
-                        JSON.parse(part.args)
+                        coerceToolInput(part.input)
                     ));
                 }
             }

@@ -1,29 +1,50 @@
 import * as vscode from 'vscode';
-import { LanguageModelV1, LanguageModelV1Prompt } from 'ai';
+import { LanguageModel } from 'ai';
 
-export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector = { family: 'gpt-4' }): LanguageModelV1 {
-  return {
-    specificationVersion: 'v1',
-    defaultObjectGenerationMode: undefined,
+function toolResultOutputToText(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (!output || typeof output !== 'object') return String(output ?? '');
+  if ('type' in output) {
+    const typed = output as { type: string; value?: unknown; reason?: string };
+    if (typed.type === 'text' || typed.type === 'error-text') return String(typed.value ?? '');
+    if (typed.type === 'json' || typed.type === 'error-json') return JSON.stringify(typed.value ?? null);
+    if (typed.type === 'execution-denied') return String(typed.reason ?? 'Execution denied');
+    if (typed.type === 'content') return JSON.stringify(typed.value ?? []);
+  }
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
+}
+
+export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector = { family: 'gpt-4' }): LanguageModel {
+  const model: any = {
+    specificationVersion: 'v3',
     modelId: 'vscode-lm',
     provider: 'vscode',
-    async doGenerate(options) {
+    supportedUrls: {},
+    async doGenerate(options: any): Promise<any> {
       const models = await vscode.lm.selectChatModels(modelSelector);
       if (models.length === 0) {
         throw new Error('No VS Code language models found for the given selector');
       }
       const model = models[0];
 
-      const messages = options.prompt.map(m => {
+      const messages = (options.prompt as any[]).map((m: any) => {
         if (Array.isArray(m.content)) {
-          const parts = m.content.map(c => {
+          const parts = (m.content as any[]).map((c: any) => {
             if (c.type === 'text') return new vscode.LanguageModelTextPart(c.text);
-            if (c.type === 'tool-result') return new vscode.LanguageModelToolResultPart(c.toolCallId, [new vscode.LanguageModelTextPart(String(c.result))]);
+            if (c.type === 'tool-result') return new vscode.LanguageModelToolResultPart(
+              c.toolCallId,
+              [new vscode.LanguageModelTextPart(toolResultOutputToText(c.output))]
+            );
             return null;
-          }).filter((p): p is vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart => p !== null);
-          
+          }).filter((p: vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart | null): p is vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart => p !== null);
+
           if (m.role === 'user') return vscode.LanguageModelChatMessage.User(parts);
           if (m.role === 'assistant') return vscode.LanguageModelChatMessage.Assistant(parts.filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart));
+          if (m.role === 'tool') return vscode.LanguageModelChatMessage.User(parts);
           return vscode.LanguageModelChatMessage.User(parts);
         }
 
@@ -37,10 +58,10 @@ export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector =
         }
       });
 
-      const vscodeTools: vscode.LanguageModelChatTool[] = ((options as any).tools || []).map((t: any) => ({
+      const vscodeTools: vscode.LanguageModelChatTool[] = ((options.tools as any[]) || []).map((t: any) => ({
         name: t.name,
         description: t.description || '',
-        inputSchema: t.parameters as any,
+        inputSchema: t.parameters || t.inputSchema,
       }));
 
       const cts = new vscode.CancellationTokenSource();
@@ -58,46 +79,51 @@ export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector =
       }, cts.token);
       
       let text = '';
-      const toolCalls: any[] = [];
+      const toolCalls: Array<{ toolCallId: string; toolName: string; input: string }> = [];
 
       for await (const part of response.stream) {
         if (part instanceof vscode.LanguageModelTextPart) {
           text += part.value;
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push({
-            toolCallType: 'function',
             toolCallId: part.callId,
             toolName: part.name,
-            args: JSON.stringify(part.input),
+            input: JSON.stringify(part.input),
           });
         }
       }
 
       return {
-        text: text || undefined,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        content: toolCalls.length > 0
+          ? [...(text ? [{ type: 'text' as const, text }] : []), ...toolCalls.map(tc => ({ type: 'tool-call' as const, ...tc }))]
+          : text
+            ? [{ type: 'text' as const, text }]
+            : [],
         finishReason: toolCalls.length > 0 ? 'tool-calls' : 'stop',
-        usage: { promptTokens: 0, completionTokens: 0 },
-        rawCall: { rawPrompt: options.prompt, rawSettings: {} },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       };
     },
-    async doStream(options) {
+    async doStream(options: any): Promise<any> {
       const models = await vscode.lm.selectChatModels(modelSelector);
       if (models.length === 0) {
         throw new Error('No VS Code language models found for the given selector');
       }
       const model = models[0];
 
-      const messages = options.prompt.map(m => {
+      const messages = (options.prompt as any[]).map((m: any) => {
         if (Array.isArray(m.content)) {
-          const parts = m.content.map(c => {
+          const parts = (m.content as any[]).map((c: any) => {
             if (c.type === 'text') return new vscode.LanguageModelTextPart(c.text);
-            if (c.type === 'tool-result') return new vscode.LanguageModelToolResultPart(c.toolCallId, [new vscode.LanguageModelTextPart(String(c.result))]);
+            if (c.type === 'tool-result') return new vscode.LanguageModelToolResultPart(
+              c.toolCallId,
+              [new vscode.LanguageModelTextPart(toolResultOutputToText(c.output))]
+            );
             return null;
-          }).filter((p): p is vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart => p !== null);
+          }).filter((p: vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart | null): p is vscode.LanguageModelTextPart | vscode.LanguageModelToolResultPart => p !== null);
           
           if (m.role === 'user') return vscode.LanguageModelChatMessage.User(parts);
           if (m.role === 'assistant') return vscode.LanguageModelChatMessage.Assistant(parts.filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart));
+          if (m.role === 'tool') return vscode.LanguageModelChatMessage.User(parts);
           return vscode.LanguageModelChatMessage.User(parts);
         }
         
@@ -111,10 +137,10 @@ export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector =
         }
       });
 
-      const vscodeTools: vscode.LanguageModelChatTool[] = ((options as any).tools || []).map((t: any) => ({
+      const vscodeTools: vscode.LanguageModelChatTool[] = ((options.tools as any[]) || []).map((t: any) => ({
         name: t.name,
         description: t.description || '',
-        inputSchema: t.parameters as any,
+        inputSchema: t.parameters || t.inputSchema,
       }));
 
       const cts = new vscode.CancellationTokenSource();
@@ -137,18 +163,17 @@ export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector =
             try {
               for await (const part of response.stream) {
                 if (part instanceof vscode.LanguageModelTextPart) {
-                  controller.enqueue({ type: 'text-delta', textDelta: part.value });
+                  controller.enqueue({ type: 'text-delta', id: 'text', delta: part.value });
                 } else if (part instanceof vscode.LanguageModelToolCallPart) {
                   controller.enqueue({
                     type: 'tool-call',
-                    toolCallType: 'function',
                     toolCallId: part.callId,
                     toolName: part.name,
-                    args: JSON.stringify(part.input),
+                    input: JSON.stringify(part.input),
                   });
                 }
               }
-              controller.enqueue({ type: 'finish', finishReason: 'stop', usage: { promptTokens: 0, completionTokens: 0 } });
+              controller.enqueue({ type: 'finish', finishReason: 'stop', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } });
             } catch (err) {
               controller.error(err);
             } finally {
@@ -156,8 +181,9 @@ export function createVSCodeLM(modelSelector: vscode.LanguageModelChatSelector =
             }
           }
         }),
-        rawCall: { rawPrompt: options.prompt, rawSettings: {} },
       };
     }
   };
+
+  return model as LanguageModel;
 }

@@ -73,6 +73,31 @@ export const CodemapList: React.FC<CodemapListProps> = ({
     return date.toLocaleDateString();
   };
 
+  const formatDuration = (ms?: number) => {
+    if (!ms || ms <= 0) return '';
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = Math.round(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.round(seconds / 60);
+    return `${mins}m`;
+  };
+
+  const buildMetaTitle = (item: CodemapHistoryItem) => {
+    const meta = item.codemap.metadata;
+    if (!meta) return undefined;
+    const parts: string[] = [];
+    if (meta.model) parts.push(`Model: ${meta.model}`);
+    if (typeof meta.totalTokens === 'number') parts.push(`Tokens: ${meta.totalTokens.toLocaleString()}`);
+    if (meta.timeTakenMs) parts.push(`Time: ${formatDuration(meta.timeTakenMs)}`);
+    if (meta.linesRead) parts.push(`Lines: ${meta.linesRead.toLocaleString()}`);
+    if (meta.filesRead?.length) parts.push(`Files: ${meta.filesRead.length}`);
+    if (meta.repoId) parts.push(`Repo: ${meta.repoId}`);
+    if (meta.git?.branch) parts.push(`Branch: ${meta.git.branch}`);
+    if (meta.git?.commit) parts.push(`Commit: ${meta.git.commit}`);
+    if (meta.git?.dirty !== undefined) parts.push(`Dirty: ${meta.git.dirty ? 'yes' : 'no'}`);
+    return parts.length ? parts.join(' • ') : undefined;
+  };
+
   const isCurrentCodemap = (item: CodemapHistoryItem) => {
     return currentCodemap && currentCodemap.title === item.codemap.title;
   };
@@ -84,6 +109,8 @@ export const CodemapList: React.FC<CodemapListProps> = ({
 
   // Get current active agent label
   const currentAgentLabel = progress?.activeAgents[activeAgentIndex]?.label || progress?.currentPhase || 'Processing...';
+  const lastFileName = progress?.lastFile ? progress.lastFile.split(/[\\/]/).pop() : '';
+  const recentFiles = progress?.recentFiles || [];
 
   return (
     <div className="codemap-list-section">
@@ -103,7 +130,7 @@ export const CodemapList: React.FC<CodemapListProps> = ({
 
       {/* Processing indicator with progress */}
       {isProcessing && (
-        <div className="codemap-item processing-item">
+        <div className={`codemap-item processing-item ${progress?.parallelToolsActive ? 'parallel-fire' : ''}`}>
           <div className="codemap-item-header">
             <span className="codemap-item-title">
               Generating...
@@ -157,6 +184,60 @@ export const CodemapList: React.FC<CodemapListProps> = ({
               )}
             </div>
           </div>
+
+          <div className="progress-meta">
+            {progress?.stageNumber !== undefined && (
+              <div className="meta-chip" title="Current stage">
+                <span className="meta-label">Stage</span>
+                <span className="meta-value">{progress.stageNumber}</span>
+              </div>
+            )}
+            {progress?.filesRead !== undefined && progress.filesRead > 0 && (
+              <div className="meta-chip" title="Files read">
+                <span className="meta-label">Files</span>
+                <span className="meta-value">{progress.filesRead}</span>
+              </div>
+            )}
+            {progress?.linesRead !== undefined && progress.linesRead > 0 && (
+              <div className="meta-chip" title="Lines read">
+                <span className="meta-label">Lines</span>
+                <span className="meta-value">{progress.linesRead.toLocaleString()}</span>
+              </div>
+            )}
+            {progress?.toolBreakdown && (progress.toolBreakdown.internal + progress.toolBreakdown.vscode) > 0 && (
+              <div className="meta-chip" title="Tools used (internal / VS Code)">
+                <span className="meta-label">Tools</span>
+                <span className="meta-value">
+                  {progress.toolBreakdown.internal}/{progress.toolBreakdown.vscode}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {progress?.lastFile && (
+            <div className="progress-file" title={progress.lastFile}>
+              Reading: <span className="mono">{lastFileName || progress.lastFile}</span>
+            </div>
+          )}
+
+          {progress?.lastTool && (
+            <div className="progress-tool" title={progress.lastTool}>
+              Tool: <span className="mono">{progress.lastTool}</span>
+            </div>
+          )}
+
+          {recentFiles.length > 0 && (
+            <div className="progress-recent">
+              {recentFiles.map((file) => {
+                const name = file.split(/[\\/]/).pop() || file;
+                return (
+                  <span key={file} className="file-chip" title={file}>
+                    {name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -213,6 +294,11 @@ export const CodemapList: React.FC<CodemapListProps> = ({
                 : item.codemap.description}
             </div>
             <div className="codemap-item-time">{formatTime(item.timestamp)}</div>
+            {item.codemap.metadata?.totalTokens !== undefined && (
+              <div className="codemap-item-meta" title={buildMetaTitle(item)}>
+                {item.codemap.metadata.totalTokens.toLocaleString()} tokens
+              </div>
+            )}
           </div>
         ))
       )}

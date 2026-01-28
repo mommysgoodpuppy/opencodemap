@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { MermaidPlaceholderToAccentKey } from '../mermaidPlaceholders';
+import React, { useEffect, useRef, useState } from "react";
+import { MermaidPlaceholderToAccentKey } from "../mermaidPlaceholders";
 
 interface MermaidDiagramProps {
   code: string;
@@ -14,25 +14,27 @@ let mermaidInstance: any = null;
 let svgPanZoomFactory: any = null;
 
 function getCssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name);
+  const value = getComputedStyle(document.documentElement).getPropertyValue(
+    name,
+  );
   return value?.trim() || fallback;
 }
 
 function isVsCodeDarkTheme(): boolean {
   // VS Code webview sets theme classes on <body>
   return (
-    document.body.classList.contains('vscode-dark') ||
-    document.body.classList.contains('vscode-high-contrast')
+    document.body.classList.contains("vscode-dark") ||
+    document.body.classList.contains("vscode-high-contrast")
   );
 }
 
 function colorToHex(input: string): string {
   const v = input.trim();
   if (!v) return v;
-  if (v.startsWith('#')) return v;
+  if (v.startsWith("#")) return v;
 
   // Convert any CSS color string into computed rgb(...) then parse it.
-  const el = document.createElement('div');
+  const el = document.createElement("div");
   el.style.color = v;
   document.body.appendChild(el);
   const computed = getComputedStyle(el).color;
@@ -43,9 +45,13 @@ function colorToHex(input: string): string {
   const r = parseInt(match[1], 10);
   const g = parseInt(match[2], 10);
   const b = parseInt(match[3], 10);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
-    .toString(16)
-    .padStart(2, '0')}`;
+  return `#${r.toString(16).padStart(2, "0")}${
+    g.toString(16).padStart(2, "0")
+  }${
+    b
+      .toString(16)
+      .padStart(2, "0")
+  }`;
 }
 
 type MermaidThemePalette = {
@@ -69,33 +75,41 @@ type MermaidThemePalette = {
 function getMermaidThemePalette(): MermaidThemePalette {
   // Align with windsurf's Code Map: take theme colors from VS Code injected CSS variables.
   return {
-    sidebarBg: getCssVar('--vscode-sideBar-background', '#252526'),
-    sidebarFg: getCssVar('--vscode-sideBar-foreground', '#cccccc'),
-    editorBg: getCssVar('--vscode-editor-background', '#1e1e1e'),
-    editorFg: getCssVar('--vscode-editor-foreground', '#d4d4d4'),
-    panelBorder: getCssVar('--vscode-panel-border', '#3c3c3c'),
-    toolbarHoverBg: getCssVar('--vscode-toolbar-hoverBackground', '#2a2d2e'),
-    focusBorder: getCssVar('--vscode-focusBorder', '#007fd4'),
-    accentBlue: getCssVar('--vscode-charts-blue', '#a5d8ff'),
-    accentOrange: getCssVar('--vscode-charts-orange', '#ffd8a8'),
-    accentPurple: getCssVar('--vscode-charts-purple', '#d0bfff'),
-    accentGreen: getCssVar('--vscode-charts-green', '#b2f2bb'),
-    accentRed: getCssVar('--vscode-charts-red', '#fcc2d7'),
-    accentYellow: getCssVar('--vscode-charts-yellow', '#ffec99'),
-    accentCyan: getCssVar('--vscode-debugIcon-breakpointForeground', '#99e9f2'),
-    accentPink: getCssVar('--vscode-debugTokenExpression-string', '#eebefa'),
+    sidebarBg: getCssVar("--vscode-sideBar-background", "#252526"),
+    sidebarFg: getCssVar("--vscode-sideBar-foreground", "#cccccc"),
+    editorBg: getCssVar("--vscode-editor-background", "#1e1e1e"),
+    editorFg: getCssVar("--vscode-editor-foreground", "#d4d4d4"),
+    panelBorder: getCssVar("--vscode-panel-border", "#3c3c3c"),
+    toolbarHoverBg: getCssVar("--vscode-toolbar-hoverBackground", "#2a2d2e"),
+    focusBorder: getCssVar("--vscode-focusBorder", "#007fd4"),
+    accentBlue: getCssVar("--vscode-charts-blue", "#a5d8ff"),
+    accentOrange: getCssVar("--vscode-charts-orange", "#ffd8a8"),
+    accentPurple: getCssVar("--vscode-charts-purple", "#d0bfff"),
+    accentGreen: getCssVar("--vscode-charts-green", "#b2f2bb"),
+    accentRed: getCssVar("--vscode-charts-red", "#fcc2d7"),
+    accentYellow: getCssVar("--vscode-charts-yellow", "#ffec99"),
+    accentCyan: getCssVar("--vscode-debugIcon-breakpointForeground", "#99e9f2"),
+    accentPink: getCssVar("--vscode-debugTokenExpression-string", "#eebefa"),
   };
 }
 
-function applyWindsurfColorSubstitutions(code: string, palette: MermaidThemePalette): string {
+function applyWindsurfColorSubstitutions(
+  code: string,
+  palette: MermaidThemePalette,
+): string {
   // windsurf 的 Code Map 会把这些“占位色”替换为当前主题色，并附加 fill-opacity。
   const opacity = isVsCodeDarkTheme() ? 0.25 : 0.15;
 
   let out = code;
-  for (const [placeholder, accentKey] of Object.entries(MermaidPlaceholderToAccentKey)) {
-    const actualColor = palette[accentKey as keyof MermaidThemePalette] as string;
+  for (
+    const [placeholder, accentKey] of Object.entries(
+      MermaidPlaceholderToAccentKey,
+    )
+  ) {
+    const actualColor =
+      palette[accentKey as keyof MermaidThemePalette] as string;
     const replacement = `${colorToHex(actualColor)},fill-opacity:${opacity}`;
-    out = out.replace(new RegExp(placeholder, 'g'), replacement);
+    out = out.replace(new RegExp(placeholder, "g"), replacement);
   }
   return out;
 }
@@ -109,9 +123,9 @@ function applySubgraphOpacity(svgElement: SVGSVGElement): void {
 
   // Subgraph clusters in mermaid have class "cluster"
   // Their background rect is the first rect child
-  const clusters = svgElement.querySelectorAll('g.cluster > rect');
+  const clusters = svgElement.querySelectorAll("g.cluster > rect");
   clusters.forEach((rect) => {
-    rect.setAttribute('fill-opacity', String(opacity));
+    rect.setAttribute("fill-opacity", String(opacity));
   });
 }
 
@@ -129,41 +143,48 @@ function extractStepLabel(text: string): string | null {
  */
 function attachNodeClickHandlers(
   svgElement: SVGSVGElement,
-  onNodeClick: (stepLabel: string) => void
+  onNodeClick: (stepLabel: string) => void,
 ): void {
   // Mermaid renders nodes as <g class="node"> elements
-  const nodes = svgElement.querySelectorAll('g.node');
-  
+  const nodes = svgElement.querySelectorAll("g.node");
+
   nodes.forEach((node) => {
     // Get the text content of the node (from foreignObject or text elements)
-    const textContent = node.textContent || '';
+    const textContent = node.textContent || "";
     const stepLabel = extractStepLabel(textContent.trim());
-    
+
     if (stepLabel) {
       // Make the node clickable
-      (node as SVGGElement).style.cursor = 'pointer';
-      
+      (node as SVGGElement).style.cursor = "pointer";
+
       // Add hover effect
-      node.addEventListener('mouseenter', () => {
-        const rect = node.querySelector('rect');
+      node.addEventListener("mouseenter", () => {
+        const rect = node.querySelector("rect");
         if (rect) {
-          rect.setAttribute('data-original-stroke', rect.getAttribute('stroke') || '');
-          rect.setAttribute('stroke', getCssVar('--vscode-focusBorder', '#007fd4'));
-          rect.setAttribute('stroke-width', '2');
+          rect.setAttribute(
+            "data-original-stroke",
+            rect.getAttribute("stroke") || "",
+          );
+          rect.setAttribute(
+            "stroke",
+            getCssVar("--vscode-focusBorder", "#007fd4"),
+          );
+          rect.setAttribute("stroke-width", "2");
         }
       });
-      
-      node.addEventListener('mouseleave', () => {
-        const rect = node.querySelector('rect');
+
+      node.addEventListener("mouseleave", () => {
+        const rect = node.querySelector("rect");
         if (rect) {
-          const originalStroke = rect.getAttribute('data-original-stroke') || '';
-          rect.setAttribute('stroke', originalStroke);
-          rect.setAttribute('stroke-width', '1');
+          const originalStroke = rect.getAttribute("data-original-stroke") ||
+            "";
+          rect.setAttribute("stroke", originalStroke);
+          rect.setAttribute("stroke-width", "1");
         }
       });
-      
+
       // Add click handler
-      node.addEventListener('click', (e) => {
+      node.addEventListener("click", (e) => {
         e.stopPropagation();
         onNodeClick(stepLabel);
       });
@@ -173,12 +194,12 @@ function attachNodeClickHandlers(
 
 async function loadDeps() {
   if (!mermaidInstance) {
-    const mermaidModule = await import('mermaid');
+    const mermaidModule = await import("mermaid");
     mermaidInstance = mermaidModule.default;
   }
 
   if (!svgPanZoomFactory) {
-    const panZoomModule = await import('svg-pan-zoom');
+    const panZoomModule = await import("svg-pan-zoom");
     svgPanZoomFactory = (panZoomModule as any).default || panZoomModule;
   }
 
@@ -190,10 +211,12 @@ async function loadDeps() {
  */
 export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
   code,
-  id = 'mermaid-diagram',
+  id = "mermaid-diagram",
   onNodeClick,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // hostRef holds only the mermaid-generated SVG. Keep React-managed overlays outside this node
+  // to avoid React attempting to remove DOM nodes that were replaced by Mermaid.
+  const hostRef = useRef<HTMLDivElement>(null);
   const panZoomRef = useRef<any>(null);
   const onNodeClickRef = useRef(onNodeClick);
   const [error, setError] = useState<string | null>(null);
@@ -210,13 +233,16 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
     const observer = new MutationObserver(() => {
       setThemeVersion((v) => v + 1);
     });
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    if (!code || !containerRef.current) {
-      setError(code ? null : 'No diagram code provided');
+    if (!code || !hostRef.current) {
+      setError(code ? null : "No diagram code provided");
       return;
     }
 
@@ -240,14 +266,14 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
 
         mermaid.initialize({
           startOnLoad: false,
-          theme: 'base',
-          securityLevel: 'loose',
+          theme: "base",
+          securityLevel: "loose",
           themeVariables: {
             fontFamily: getCssVar(
-              '--vscode-font-family',
-              'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
+              "--vscode-font-family",
+              "Segoe UI, Tahoma, Geneva, Verdana, sans-serif",
             ),
-            fontSize: '18px',
+            fontSize: "18px",
             primaryColor: palette.editorFg,
             primaryTextColor: palette.editorFg,
             primaryBorderColor: palette.editorFg,
@@ -272,27 +298,27 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
           flowchart: {
             useMaxWidth: false,
             htmlLabels: true,
-            nodeSpacing: 50,
-            rankSpacing: 50,
-            padding: 16,
-            curve: 'basis',
+            nodeSpacing: 25,
+            rankSpacing: 25,
+            padding: 8,
+            curve: "basis",
           },
         });
 
         // Clear previous content
-        if (!containerRef.current) {
+        if (!hostRef.current) {
           return;
         }
-        containerRef.current.innerHTML = '';
+        hostRef.current.innerHTML = "";
 
         const renderId = `${id}-${Date.now()}`;
         const { svg } = await mermaid.render(renderId, diagramCode);
-        if (disposed || !containerRef.current) {
+        if (disposed || !hostRef.current) {
           return;
         }
 
-        containerRef.current.innerHTML = svg;
-        const svgElement = containerRef.current.querySelector('svg');
+        hostRef.current.innerHTML = svg;
+        const svgElement = hostRef.current.querySelector("svg");
 
         if (svgElement) {
           applySubgraphOpacity(svgElement);
@@ -322,8 +348,10 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
           instance.center();
         }
       } catch (err) {
-        console.error('Mermaid render error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to render diagram');
+        console.error("Mermaid render error:", err);
+        setError(
+          err instanceof Error ? err.message : "Failed to render diagram",
+        );
       } finally {
         if (!disposed) {
           setLoading(false);
@@ -359,24 +387,47 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
   return (
     <div className="mermaid-viewer">
       <div className="mermaid-controls">
-        <button className="mermaid-btn" onClick={handleZoomIn} title="Zoom In">+</button>
-        <button className="mermaid-btn" onClick={handleZoomOut} title="Zoom Out">−</button>
-        <button className="mermaid-btn" onClick={handleReset} title="Reset">⟳</button>
+        <button className="mermaid-btn" onClick={handleZoomIn} title="Zoom In">
+          +
+        </button>
+        <button
+          className="mermaid-btn"
+          onClick={handleZoomOut}
+          title="Zoom Out"
+        >
+          −
+        </button>
+        <button className="mermaid-btn" onClick={handleReset} title="Reset">
+          ⟳
+        </button>
       </div>
 
-      <div className="mermaid-stage" ref={containerRef}>
+      <div className="mermaid-stage">
+        <div className="mermaid-canvas" ref={hostRef} />
         {loading && (
           <div className="diagram-loading overlay">Rendering diagram...</div>
         )}
         {error && (
           <div className="diagram-error overlay">
             <div>Failed to render diagram:</div>
-            <pre style={{ fontSize: '11px', marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+            <pre
+              style={{
+                fontSize: "11px",
+                marginTop: "8px",
+                whiteSpace: "pre-wrap",
+              }}
+            >
               {error}
             </pre>
-            <details style={{ marginTop: '12px', fontSize: '11px' }}>
+            <details style={{ marginTop: "12px", fontSize: "11px" }}>
               <summary>View diagram code</summary>
-              <pre style={{ marginTop: '8px', whiteSpace: 'pre-wrap', textAlign: 'left' }}>
+              <pre
+                style={{
+                  marginTop: "8px",
+                  whiteSpace: "pre-wrap",
+                  textAlign: "left",
+                }}
+              >
                 {code}
               </pre>
             </details>

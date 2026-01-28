@@ -39,6 +39,8 @@ export interface Codemap {
   description: string;
   traces: CodemapTrace[];
   mermaidDiagram?: string;
+  debugLogPath?: string;
+  metadata?: CodemapMetadata;
   savedAt?: string;
   // Optional metadata persisted by extension storage (backwards compatible)
   updatedAt?: string;
@@ -49,6 +51,20 @@ export interface Codemap {
   schemaVersion?: number;
   // Persisted Stage 1-2 shared context for retries
   stage12Context?: CodemapStage12ContextV1;
+}
+
+export interface CodemapMetadata {
+  model?: string;
+  totalTokens?: number;
+  timeTakenMs?: number;
+  linesRead?: number;
+  filesRead?: string[];
+  repoId?: string;
+  git?: {
+    commit?: string;
+    branch?: string;
+    dirty?: boolean;
+  };
 }
 
 export interface AgentMessage {
@@ -75,14 +91,28 @@ export interface ProgressState {
   completedStages: number;
   activeAgents: ActiveAgent[];
   currentPhase: string;
+  logPath?: string;
+  parallelToolsActive?: boolean;
   totalTokens?: number;
   totalToolCalls?: number;
+  stageNumber?: number;
+  filesRead?: number;
+  linesRead?: number;
+  lastFile?: string;
+  lastTool?: string;
+  recentFiles?: string[];
+  toolBreakdown?: ToolBreakdown;
 }
 
 export interface ActiveAgent {
   id: string;
   label: string;
   startTime: number;
+}
+
+export interface ToolBreakdown {
+  internal: number;
+  vscode: number;
 }
 
 export interface ModelInfo {
@@ -104,6 +134,7 @@ export type WebviewToExtensionMessage =
   | { command: 'refreshSuggestions' }
   | { command: 'openJson' }
   | { command: 'openMermaid' }
+  | { command: 'openDebugLog' }
   | { command: 'ensureMermaidDiagram' }
   | { command: 'retryTrace'; traceId: string }
   | { command: 'retryAllTraces' }

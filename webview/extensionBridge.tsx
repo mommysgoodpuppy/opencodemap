@@ -53,6 +53,7 @@ export function useExtensionCommands() {
       refreshSuggestions: () => api.postMessage({ command: 'refreshSuggestions' }),
       openJson: () => api.postMessage({ command: 'openJson' }),
       openMermaid: () => api.postMessage({ command: 'openMermaid' }),
+      openDebugLog: () => api.postMessage({ command: 'openDebugLog' }),
       ensureMermaidDiagram: () => api.postMessage({ command: 'ensureMermaidDiagram' }),
       retryTrace: (traceId: string) => api.postMessage({ command: 'retryTrace', traceId }),
       retryAllTraces: () => api.postMessage({ command: 'retryAllTraces' }),

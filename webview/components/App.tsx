@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw, FileText } from 'lucide-react';
+import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw, FileText, FileSpreadsheet } from 'lucide-react';
 import { QueryBar } from './QueryBar';
 import { SuggestionSection } from './SuggestionSection';
 import { CodemapList } from './CodemapList';
@@ -179,6 +179,10 @@ export const App: React.FC = () => {
     commands.openMermaid();
   }, [commands]);
 
+  const handleOpenDebugLog = useCallback(() => {
+    commands.openDebugLog();
+  }, [commands]);
+
   const handleRetryTrace = useCallback((traceId: string) => {
     if (state.isProcessing) return;
     commands.retryTrace(traceId);
@@ -249,6 +253,7 @@ export const App: React.FC = () => {
           onSelectModel={handleSelectModel}
           onCancel={handleCancel}
           onPickTools={handlePickTools}
+          onOpenDebugLog={handleOpenDebugLog}
         />
 
         <SuggestionSection
@@ -358,6 +363,14 @@ export const App: React.FC = () => {
           >
             <FileText size={14} />
             Mermaid
+          </button>
+          <button
+            className="view-tab"
+            onClick={handleOpenDebugLog}
+            title="Open debug log"
+          >
+            <FileSpreadsheet size={14} />
+            Log
           </button>
         </div>
       </div>
