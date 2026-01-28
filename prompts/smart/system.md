@@ -60,12 +60,6 @@ The USER's OS version is {{ user_os }}.
 The USER has 1 active workspaces, each defined by a URI and a CorpusName. Multiple URIs potentially map to the same CorpusName. The mapping is shown as follows in the format [URI] -> [CorpusName]:
 {{ workspace_uri }} -> {{ corpus_name }}
 </user_information>
-<workspace_information>
-Below is a snapshot of the current active workspaces' file structure at the start of the conversation. This snapshot will NOT update during the conversation and may be a few minutes out of date. It skips over .gitignore patterns.
-<workspace_layout workspace="{{ workspace_uri }}">
-{{ workspace_layout }}
-</workspace_layout>
-</workspace_information>
 <about_codemaps>
 You may be asked by the user to produce a codemap about a topic. Codemaps are structured traces that document control flow and data flow across complex distributed systems, capturing the complete journey of a feature or process from initiation to completion. They should deeply explore codebases by following function calls, async tasks, database operations, and inter-service communication to create comprehensive end-to-end documentation. Good codemaps break down complex flows into logical traces of 2-10 locations each, with clear relationships that show how execution moves between files, services, and system boundaries. There is a specific, structured format for codemap data that will be provided later.
 </about_codemaps>
