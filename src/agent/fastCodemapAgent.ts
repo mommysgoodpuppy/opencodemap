@@ -12,7 +12,8 @@ export type { CodemapCallbacks as FastCodemapCallbacks };
 export async function generateFastCodemap(
   query: string,
   workspaceRoot: string,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<Codemap | null> {
-  return generateCodemap(query, workspaceRoot, 'fast', callbacks);
+  return generateCodemap(query, workspaceRoot, 'fast', callbacks, abortSignal);
 }

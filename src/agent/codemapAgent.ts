@@ -13,7 +13,7 @@
  */
 
 import { generateText, CoreMessage } from 'ai';
-import { getOpenAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
+import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon, loadMermaidPrompt } from '../prompts';
 import { allTools } from '../tools';
 import type { Codemap } from '../types';
@@ -81,6 +81,7 @@ interface TraceProcessingResult {
  */
 interface TraceProcessingOptions {
   includeGuide?: boolean;  // Whether to execute Stage 5 to generate guide
+  abortSignal?: AbortSignal;
 }
 
 interface MermaidProcessingResult {
@@ -110,7 +111,7 @@ async function processTraceStages(
   const stagesDescription = options.includeGuide ? 'stages 3-5' : 'stages 3-4';
   logger.info(`[Trace ${traceId}] Starting trace processing (${stagesDescription})`);
   
-  const client = getOpenAIClient()!;
+  const client = getAIClient()!;
 
   const messages: CoreMessage[] = [...baseMessages];
   let diagram: string | undefined;
@@ -124,11 +125,14 @@ async function processTraceStages(
     logger.debug(`[Trace ${traceId}] Stage 3 prompt length: ${stage3Prompt.length}`);
     messages.push({ role: 'user', content: stage3Prompt });
 
+    if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
+
     logger.info(`[Trace ${traceId}] Stage 3: Calling API...`);
     const stage3Result = await generateText({
       model: client(getModelName()),
       system: systemPrompt,
       messages,
+      abortSignal: options.abortSignal,
     });
     logger.info(`[Trace ${traceId}] Stage 3: API response received, text length: ${stage3Result.text?.length || 0}`);
 
@@ -147,11 +151,14 @@ async function processTraceStages(
     const stage4Prompt = loadTraceStagePrompt(4, traceId, { current_date: currentDate, language });
     messages.push({ role: 'user', content: stage4Prompt });
 
+    if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
+
     logger.info(`[Trace ${traceId}] Stage 4: Calling API...`);
     const stage4Result = await generateText({
       model: client(getModelName()),
       system: systemPrompt,
       messages,
+      abortSignal: options.abortSignal,
     });
     logger.info(`[Trace ${traceId}] Stage 4: API response received, text length: ${stage4Result.text?.length || 0}`);
 
@@ -176,11 +183,14 @@ async function processTraceStages(
       const stage5Prompt = loadTraceStagePrompt(5, traceId, { current_date: currentDate, language });
       messages.push({ role: 'user', content: stage5Prompt });
 
+      if (options.abortSignal?.aborted) throw new Error('Generation cancelled');
+
       logger.info(`[Trace ${traceId}] Stage 5: Calling API...`);
       const stage5Result = await generateText({
         model: client(getModelName()),
         system: systemPrompt,
         messages,
+        abortSignal: options.abortSignal,
       });
       logger.info(`[Trace ${traceId}] Stage 5: API response received, text length: ${stage5Result.text?.length || 0}`);
 
@@ -220,11 +230,12 @@ async function processMermaidDiagram(
   baseMessages: CoreMessage[],
   currentDate: string,
   language: string,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<MermaidProcessingResult> {
   logger.info('[Mermaid] Starting mermaid diagram generation');
 
-  const client = getOpenAIClient()!;
+  const client = getAIClient()!;
 
   const messages: CoreMessage[] = [...baseMessages];
 
@@ -235,11 +246,14 @@ async function processMermaidDiagram(
     messages.push({ role: 'user', content: mermaidPrompt });
     callbacks.onMessage?.('user', '[Mermaid] Generating global mermaid diagram...');
 
+    if (abortSignal?.aborted) throw new Error('Generation cancelled');
+
     logger.info('[Mermaid] Calling API...');
     const mermaidResult = await generateText({
       model: client(getModelName()),
       system: systemPrompt,
       messages,
+      abortSignal,
     });
     logger.info(`[Mermaid] API response received, text length: ${mermaidResult.text?.length || 0}`);
 
@@ -284,7 +298,8 @@ export async function generateCodemap(
   query: string,
   workspaceRoot: string,
   mode: CodemapMode,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<Codemap | null> {
   logger.separator(`CODEMAP GENERATION START - ${mode.toUpperCase()} MODE`);
   logger.info(`Query: ${query}`);
@@ -296,7 +311,7 @@ export async function generateCodemap(
     throw new Error('OpenAI API key not configured');
   }
 
-  const client = getOpenAIClient()!;
+  const client = getAIClient()!;
   logger.info('OpenAI client created successfully');
 
   // Prepare template variables
@@ -349,11 +364,14 @@ export async function generateCodemap(
       logger.info(`Stage 1 - Research iteration ${researchIteration}`);
       logger.info(`Stage 1 - Calling API with ${messages.length} messages...`);
       
+      if (abortSignal?.aborted) throw new Error('Generation cancelled');
+
       const result = await generateText({
         model: client(getModelName()),
         system: systemPrompt,
         messages,
         tools: allTools,
+        abortSignal,
         onStepFinish: (step) => {
           logger.debug(`Stage 1 - Step finished: text=${!!step.text}, toolCalls=${step.toolCalls?.length || 0}`);
           
@@ -424,11 +442,14 @@ export async function generateCodemap(
     messages.push({ role: 'user', content: stage2Prompt });
     callbacks.onMessage?.('user', `[Stage 2] Generating codemap structure...`);
 
+    if (abortSignal?.aborted) throw new Error('Generation cancelled');
+
     logger.info('Stage 2 - Calling API...');
     const stage2Result = await generateText({
       model: client(getModelName()),
       system: systemPrompt,
       messages,
+      abortSignal,
     });
     logger.info(`Stage 2 - API response received: text=${!!stage2Result.text}`);
 
@@ -474,7 +495,8 @@ export async function generateCodemap(
           messages,
           currentDate,
           language,
-          callbacks
+          callbacks,
+          abortSignal
         );
       } else {
         logger.error('Stage 2 - FAILED to extract codemap from response!');
@@ -498,7 +520,8 @@ export async function generateCodemap(
           messages,
           currentDate,
           language,
-          callbacks
+          callbacks,
+          { abortSignal }
         )
       );
 
@@ -559,7 +582,6 @@ export async function generateCodemap(
             resultCodemap.mermaidDiagram = mermaidResult.diagram;
             logger.info(`[Mermaid] Diagram stored (${mermaidResult.diagram.length} chars)`);
             callbacks.onMessage?.('assistant', '[Mermaid] Diagram saved to codemap');
-            callbacks.onCodemapUpdate?.(resultCodemap);
           } else if (mermaidResult?.error) {
             logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
             callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
@@ -597,7 +619,8 @@ export async function generateCodemap(
 export async function retryTraceFromStage12Context(
   traceId: string,
   context: CodemapStage12ContextV1,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<{ diagram?: string; guide?: string; error?: string }> {
   const baseMessages = toCoreMessages(context.baseMessages);
   const result = await processTraceStages(
@@ -606,7 +629,8 @@ export async function retryTraceFromStage12Context(
     baseMessages,
     context.currentDate,
     context.language,
-    callbacks
+    callbacks,
+    { abortSignal }
   );
   return { diagram: result.diagram, guide: result.guide, error: result.error };
 }
@@ -617,7 +641,8 @@ export async function retryTraceFromStage12Context(
 export async function retryTraceDiagramFromStage12Context(
   traceId: string,
   context: CodemapStage12ContextV1,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<{ diagram?: string; error?: string }> {
   const baseMessages = toCoreMessages(context.baseMessages);
   const result = await processTraceStages(
@@ -627,7 +652,7 @@ export async function retryTraceDiagramFromStage12Context(
     context.currentDate,
     context.language,
     callbacks,
-    { includeGuide: false }
+    { includeGuide: false, abortSignal }
   );
   return { diagram: result.diagram, error: result.error };
 }
@@ -637,7 +662,8 @@ export async function retryTraceDiagramFromStage12Context(
  */
 export async function retryMermaidFromStage12Context(
   context: CodemapStage12ContextV1,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<{ diagram?: string; error?: string }> {
   const baseMessages = toCoreMessages(context.baseMessages);
   const result = await processMermaidDiagram(
@@ -645,7 +671,8 @@ export async function retryMermaidFromStage12Context(
     baseMessages,
     context.currentDate,
     context.language,
-    callbacks
+    callbacks,
+    abortSignal
   );
   return { diagram: result.diagram, error: result.error };
 }
@@ -656,7 +683,8 @@ export async function retryMermaidFromStage12Context(
  */
 export async function generateMermaidFromCodemapSnapshot(
   codemap: Codemap,
-  callbacks: CodemapCallbacks = {}
+  callbacks: CodemapCallbacks = {},
+  abortSignal?: AbortSignal
 ): Promise<{ diagram?: string; error?: string }> {
   try {
     const workspaceRoot = codemap.workspacePath || '';
@@ -701,7 +729,8 @@ export async function generateMermaidFromCodemapSnapshot(
       baseMessages,
       currentDate,
       language,
-      callbacks
+      callbacks,
+      abortSignal
     );
 
     return { diagram: result.diagram, error: result.error };

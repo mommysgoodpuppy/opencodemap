@@ -12,7 +12,7 @@ function createFallbackApi(): VsCodeApi {
   return {
     postMessage: (msg: WebviewToExtensionMessage) => console.log('postMessage:', msg),
     getState: () => null,
-    setState: () => {},
+    setState: () => { },
   };
 }
 
@@ -56,6 +56,8 @@ export function useExtensionCommands() {
       retryTrace: (traceId: string) => api.postMessage({ command: 'retryTrace', traceId }),
       retryAllTraces: () => api.postMessage({ command: 'retryAllTraces' }),
       regenerateMermaidDiagram: () => api.postMessage({ command: 'regenerateMermaidDiagram' }),
+      selectModel: (modelId: string) => api.postMessage({ command: 'selectModel', modelId }),
+      cancel: () => api.postMessage({ command: 'cancel' }),
     }),
     [api]
   );

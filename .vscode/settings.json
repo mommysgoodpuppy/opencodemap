@@ -1,6 +1,11 @@
 // Place your settings in this file to overwrite default and user settings.
 {
     "files.exclude": {
+        "**/.git": false,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
         "out": false,
         "dist": false
     },
@@ -9,5 +14,6 @@
         "dist": true,
         "node_modules": true
     },
-    "typescript.tsc.autoDetect": "off"
+    "typescript.tsc.autoDetect": "off",
+    "explorerExclude.backup": {}
 }

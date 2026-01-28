@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { ModelInfo } from '../types';
 
 interface QueryBarProps {
   query: string;
@@ -7,6 +8,10 @@ interface QueryBarProps {
   onQueryChange: (query: string) => void;
   onModeChange: (mode: 'fast' | 'smart') => void;
   onSubmit: () => void;
+  availableModels: ModelInfo[];
+  selectedModel: string;
+  onSelectModel: (modelId: string) => void;
+  onCancel: () => void;
 }
 
 /**
@@ -20,6 +25,10 @@ export const QueryBar: React.FC<QueryBarProps> = ({
   onQueryChange,
   onModeChange,
   onSubmit,
+  availableModels,
+  selectedModel,
+  onSelectModel,
+  onCancel,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -30,12 +39,12 @@ export const QueryBar: React.FC<QueryBarProps> = ({
 
     // Reset height to auto to get the correct scrollHeight
     textarea.style.height = 'auto';
-    
+
     // Calculate line height (approximately 20px per line)
     const lineHeight = 20;
     const minHeight = lineHeight; // 1 line
     const maxHeight = lineHeight * 5; // 5 lines
-    
+
     // Clamp between min and max
     const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
     textarea.style.height = `${newHeight}px`;
@@ -61,6 +70,24 @@ export const QueryBar: React.FC<QueryBarProps> = ({
         rows={1}
       />
       <div className="query-controls">
+        {availableModels.length > 0 && (
+          <div className="model-selector">
+            <select
+              value={selectedModel}
+              onChange={(e) => onSelectModel(e.target.value)}
+              disabled={isProcessing}
+              className="model-select"
+              title="Select AI Model"
+            >
+              <option value="" disabled>Select Model</option>
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.vendor && `[${m.vendor}] `}{m.name}{m.isFree ? ' (Free)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="mode-toggle">
           <button
             className={`mode-btn ${mode === 'fast' ? 'active' : ''}`}

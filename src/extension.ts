@@ -7,6 +7,7 @@ import { CodemapViewProvider } from './views/CodemapViewProvider';
 import { isConfigured, refreshConfig } from './agent';
 import { getStoragePath, listCodemaps } from './storage/codemapStorage';
 import { initLogger, info, show as showLogger } from './logger';
+import { CodemapChatModelProvider } from './lmProvider';
 
 let codemapViewProvider: CodemapViewProvider;
 
@@ -16,6 +17,11 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(outputChannel);
 	
 	info('Codemap extension is now active!');
+
+	// Register Language Model Chat Provider
+	context.subscriptions.push(
+		vscode.lm.registerLanguageModelChatProvider('codemap', new CodemapChatModelProvider())
+	);
 
 	// Initialize the webview provider
 	codemapViewProvider = new CodemapViewProvider(context.extensionUri);

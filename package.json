@@ -72,10 +72,19 @@
     "configuration": {
       "title": "Codemap",
       "properties": {
+        "codemap.provider": {
+          "type": "string",
+          "default": "openai",
+          "enum": [
+            "openai",
+            "vscode"
+          ],
+          "description": "AI Provider to use. 'openai' uses an API key, 'vscode' uses models available in VS Code (like GitHub Copilot)."
+        },
         "codemap.openaiApiKey": {
           "type": "string",
           "default": "",
-          "description": "OpenAI API Key for Codemap generation"
+          "description": "OpenAI API Key for Codemap generation (only for 'openai' provider)"
         },
         "codemap.openaiBaseUrl": {
           "type": "string",
@@ -85,7 +94,7 @@
         "codemap.model": {
           "type": "string",
           "default": "gpt-4o",
-          "description": "Model to use for Codemap generation"
+          "description": "Model to use for Codemap generation (e.g., 'gpt-4o' for OpenAI, or a model selector for VS Code)"
         },
         "codemap.language": {
           "type": "string",
@@ -105,7 +114,13 @@
           "description": "Language for AI responses and generated content"
         }
       }
-    }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "codemap",
+        "displayName": "Codemap AI"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",

@@ -12,6 +12,9 @@ import {
   retryTraceFromStage12Context,
   retryMermaidFromStage12Context,
   generateMermaidFromCodemapSnapshot,
+  getAvailableModels,
+  setModel,
+  type ModelInfo,
 } from '../agent';
 import {
   saveCodemap,
@@ -51,6 +54,9 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _refreshTimer: NodeJS.Timeout | null = null;
   private _progress: ProgressState | null = null;
   private _unreadCodemaps: Set<string> = new Set();
+  private _availableModels: ModelInfo[] = [];
+  private _selectedModel: string = '';
+  private _abortController: AbortController | null = null;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     // Track recent file access
@@ -64,6 +70,13 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (doc.uri.scheme === 'file') {
         this.addRecentFile(doc.uri.fsPath);
+      }
+    });
+
+    // Refresh models when configuration changes
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codemap')) {
+        this._refreshModels();
       }
     });
   }
@@ -132,6 +145,13 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           this._updateWebview();
           // Initial load of suggestions
           this.refreshSuggestions();
+          // Initialize models
+          await this._refreshModels();
+          break;
+        case 'selectModel':
+          await setModel(message.modelId);
+          this._selectedModel = message.modelId;
+          this._updateWebview();
           break;
         case 'submit':
           await this._handleSubmit(message.query, message.mode);
@@ -164,6 +184,15 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           await this.refreshSuggestions();
           break;
         case 'navigate':
+          this._updateWebview();
+          break;
+        case 'cancel':
+          if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+          }
+          this._isProcessing = false;
+          this._progress = null;
           this._updateWebview();
           break;
         case 'openJson':
@@ -207,10 +236,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     };
     this._updateWebview();
 
+    this._abortController = new AbortController();
     try {
       const result = this._codemap.stage12Context
-        ? await retryMermaidFromStage12Context(this._codemap.stage12Context)
-        : await generateMermaidFromCodemapSnapshot(this._codemap);
+        ? await retryMermaidFromStage12Context(this._codemap.stage12Context, {}, this._abortController.signal)
+        : await generateMermaidFromCodemapSnapshot(this._codemap, {}, this._abortController.signal);
 
       if (result.error) {
         throw new Error(result.error);
@@ -275,6 +305,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     };
     this._updateWebview();
 
+    this._abortController = new AbortController();
     try {
       const stageLabels: Record<number, string> = {
         3: `Generating relation tree for Trace ${traceId}...`,
@@ -303,7 +334,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           }
           this._updateWebview();
         },
-      });
+      }, this._abortController.signal);
 
       if (result.error) {
         throw new Error(result.error);
@@ -374,6 +405,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     };
     this._updateWebview();
 
+    this._abortController = new AbortController();
     try {
       const results = await Promise.all(
         this._codemap.traces.map(async (t) => {
@@ -410,7 +442,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
               }
               this._updateWebview();
             },
-          });
+          }, this._abortController!.signal);
           return { traceId, res };
         })
       );
@@ -671,12 +703,13 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       },
     };
 
+    this._abortController = new AbortController();
     try {
       logger.info(`Calling generate${mode === 'fast' ? 'Fast' : 'Smart'}Codemap...`);
       if (mode === 'fast') {
-        await generateFastCodemap(query, workspaceRoot, callbacks);
+        await generateFastCodemap(query, workspaceRoot, callbacks, this._abortController.signal);
       } else {
-        await generateSmartCodemap(query, workspaceRoot, callbacks);
+        await generateSmartCodemap(query, workspaceRoot, callbacks, this._abortController.signal);
       }
       logger.info('Codemap generation function returned');
 
@@ -808,6 +841,13 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         suggestions: this._suggestions,
         history: this._getHistory(),
         progress: this._progress,
+        availableModels: this._availableModels,
+        selectedModel: (() => {
+          const config = vscode.workspace.getConfiguration('codemap');
+          const provider = config.get<string>('provider') || 'openai';
+          const model = config.get<string>('model') || '';
+          return `${provider}:${model}`;
+        })(),
       });
     }
   }
@@ -837,6 +877,14 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+  }
+  private async _refreshModels() {
+    try {
+      this._availableModels = await getAvailableModels();
+      this._updateWebview();
+    } catch (e) {
+      console.error('Failed to refresh models:', e);
+    }
   }
 }
 

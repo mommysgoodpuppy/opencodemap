@@ -2,7 +2,7 @@
  * Agent exports
  */
 
-export { isConfigured, refreshConfig } from './baseClient';
+export { isConfigured, refreshConfig, getAvailableModels, setModel, type ModelInfo } from './baseClient';
 export { generateSuggestions } from './suggestionAgent';
 export {
   generateCodemap,

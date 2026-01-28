@@ -11,6 +11,7 @@ interface CodemapListProps {
   onDeleteHistory: (id: string) => void;
   onRefresh: () => void;
   onRegenerateFromScratch: (item: CodemapHistoryItem) => void;
+  onCancel: () => void;
 }
 
 /**
@@ -26,6 +27,7 @@ export const CodemapList: React.FC<CodemapListProps> = ({
   onDeleteHistory,
   onRefresh,
   onRegenerateFromScratch,
+  onCancel,
 }) => {
   const [searchText, setSearchText] = useState('');
   const [activeAgentIndex, setActiveAgentIndex] = useState(0);
@@ -107,19 +109,27 @@ export const CodemapList: React.FC<CodemapListProps> = ({
               Generating...
               <span className="processing-badge">In Progress</span>
             </span>
+            <button
+              className="icon-btn"
+              onClick={onCancel}
+              title="Cancel Generation"
+              style={{ color: 'var(--vscode-errorForeground)' }}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
-          
+
           {/* Progress bar */}
           <div className="progress-container">
             <div className="progress-bar">
-              <div 
-                className="progress-fill" 
+              <div
+                className="progress-fill"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
             <span className="progress-text">{progressPercent}%</span>
           </div>
-          
+
           {/* Rotating status text */}
           <div className="progress-status">
             <span className="status-dot" />

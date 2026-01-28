@@ -13,6 +13,7 @@ import type {
   CodemapLocation,
   ExtensionToWebviewMessage,
   ProgressState,
+  ModelInfo,
 } from '../types';
 
 interface AppState {
@@ -25,6 +26,8 @@ interface AppState {
   activeView: 'tree' | 'diagram';
   page: 'home' | 'detail';
   progress?: ProgressState;
+  availableModels: ModelInfo[];
+  selectedModel: string;
 }
 
 /**
@@ -46,6 +49,8 @@ export const App: React.FC = () => {
       history: [],
       activeView: saved?.activeView || 'tree',
       page: saved?.page || 'home',
+      availableModels: [],
+      selectedModel: '',
     };
   });
 
@@ -63,7 +68,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleMessage = (event: MessageEvent<ExtensionToWebviewMessage>) => {
       const message = event.data;
-      
+
       switch (message.type) {
         case 'update':
           setState((prev) => {
@@ -82,12 +87,14 @@ export const App: React.FC = () => {
               suggestions: message.suggestions,
               history: message.history,
               progress: message.progress,
+              availableModels: message.availableModels || [],
+              selectedModel: message.selectedModel || '',
               // Stay on current page, only go home if detail page has no codemap
               page: shouldReturnHome ? 'home' : prev.page,
             };
           });
           break;
-          
+
         case 'setQuery':
           setState((prev) => ({
             ...prev,
@@ -105,10 +112,10 @@ export const App: React.FC = () => {
     };
 
     window.addEventListener('message', handleMessage);
-    
+
     // Signal that webview is ready
     commands.ready();
-    
+
     return () => window.removeEventListener('message', handleMessage);
   }, [commands]);
 
@@ -187,6 +194,14 @@ export const App: React.FC = () => {
     setState((prev) => ({ ...prev, query, mode }));
   }, [state.mode]);
 
+  const handleSelectModel = useCallback((modelId: string) => {
+    commands.selectModel(modelId);
+  }, [commands]);
+
+  const handleCancel = useCallback(() => {
+    commands.cancel();
+  }, [commands]);
+
   // Build location map for description links
   const allLocations = useMemo(() => {
     const map = new Map<string, CodemapLocation>();
@@ -211,6 +226,10 @@ export const App: React.FC = () => {
           onQueryChange={handleQueryChange}
           onModeChange={handleModeChange}
           onSubmit={handleSubmit}
+          availableModels={state.availableModels}
+          selectedModel={state.selectedModel}
+          onSelectModel={handleSelectModel}
+          onCancel={handleCancel}
         />
 
         <SuggestionSection
@@ -228,6 +247,7 @@ export const App: React.FC = () => {
           onDeleteHistory={handleDeleteHistory}
           onRefresh={handleRefreshHistory}
           onRegenerateFromScratch={handleRegenerateFromScratch}
+          onCancel={handleCancel}
         />
       </div>
     );
@@ -240,7 +260,7 @@ export const App: React.FC = () => {
       <div className="detail-header">
         {/* Title row */}
         <div className="detail-title">{state.codemap?.title || 'Codemap'}</div>
-        
+
         {/* Meta row */}
         {state.codemap?.savedAt && (
           <div className="detail-meta">
@@ -248,7 +268,7 @@ export const App: React.FC = () => {
             <span>Created {new Date(state.codemap.savedAt).toLocaleString()}</span>
           </div>
         )}
-        
+
         {/* Description with clickable location refs */}
         {state.codemap && state.codemap.description && (
           <div className="detail-description">
@@ -270,7 +290,7 @@ export const App: React.FC = () => {
             })}
           </div>
         )}
-        
+
         {/* View tabs row */}
         <div className="view-tabs">
           <button

@@ -3,7 +3,7 @@
  */
 
 import { generateText } from 'ai';
-import { getOpenAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
+import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt } from '../prompts';
 import type { CodemapSuggestion } from '../types';
 
@@ -20,7 +20,7 @@ export async function generateSuggestions(
     return [];
   }
 
-  const client = getOpenAIClient()!;
+  const client = getAIClient()!;
 
   // Load user prompt with recent files - no system prompt for this agent
   const userPrompt = loadPrompt('suggestion', 'user', {

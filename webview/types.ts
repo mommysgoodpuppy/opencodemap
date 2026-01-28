@@ -80,6 +80,14 @@ export interface ActiveAgent {
   startTime: number;
 }
 
+export interface ModelInfo {
+  id: string;
+  name: string;
+  family: string;
+  vendor: string;
+  isFree?: boolean;
+}
+
 // Messages from Webview to Extension
 export type WebviewToExtensionMessage =
   | { command: 'submit'; query: string; mode: 'fast' | 'smart' }
@@ -93,7 +101,9 @@ export type WebviewToExtensionMessage =
   | { command: 'ensureMermaidDiagram' }
   | { command: 'retryTrace'; traceId: string }
   | { command: 'retryAllTraces' }
-  | { command: 'regenerateMermaidDiagram' };
+  | { command: 'regenerateMermaidDiagram' }
+  | { command: 'selectModel'; modelId: string }
+  | { command: 'cancel' };
 
 // Messages from Extension to Webview
 export type ExtensionToWebviewMessage =
@@ -106,6 +116,8 @@ export type ExtensionToWebviewMessage =
       suggestions: CodemapSuggestion[];
       history: CodemapHistoryItem[];
       progress?: ProgressState;
+      availableModels?: ModelInfo[];
+      selectedModel?: string;
     }
   | { type: 'setQuery'; query: string }
   | { type: 'navigate'; page: 'home' | 'detail' };

@@ -110,6 +110,27 @@ body {
   margin-top: 8px;
 }
 
+.model-selector {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-select {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 3px;
+  color: var(--vscode-input-foreground, #cccccc);
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+
+.model-select:focus {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
 .mode-toggle {
   display: flex;
   gap: 4px;
