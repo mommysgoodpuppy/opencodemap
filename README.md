@@ -4,7 +4,7 @@ AI-powered code exploration and visualization for VS Code. Generate interactive 
 
 ## Features
 
-- **AI-Powered Code Analysis**: Uses OpenAI API to explore and understand code structure
+- **AI-Powered Code Analysis**: Uses OpenAI or VS Code Copilot models to explore and understand code structure
 - **Dual-View Rendering**: Switch between Tree view and Diagram view
 - **Smart Suggestions**: Auto-refreshing suggestions based on your recent activity
 - **Interactive Navigation**: Click on any location to jump to the source code
@@ -13,7 +13,7 @@ AI-powered code exploration and visualization for VS Code. Generate interactive 
 ## Quick Start
 
 1. Install the extension
-2. Set your OpenAI API key: `Cmd/Ctrl+Shift+P` → "Codemap: Set OpenAI API Key"
+2. Either use VS Code Copilot models or set an OpenAI API key: `Cmd/Ctrl+Shift+P` → "Codemap: Set OpenAI API Key"
 3. Open the Codemap panel: `Cmd/Ctrl+Shift+P` → "Codemap: Open Panel"
 4. Enter a query like "Explore the authentication flow" and click Generate
 
@@ -30,7 +30,7 @@ AI-powered code exploration and visualization for VS Code. Generate interactive 
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `codemap.openaiApiKey` | Your OpenAI API Key | - |
+| `codemap.openaiApiKey` | Your OpenAI API Key (optional if using Copilot models) | - |
 | `codemap.openaiBaseUrl` | API base URL (for compatible APIs) | `https://api.openai.com/v1` |
 | `codemap.model` | Model to use | `gpt-4o` |
 
