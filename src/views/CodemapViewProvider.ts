@@ -42,9 +42,11 @@ interface ProgressState {
   completedStages: number;
   activeAgents: ActiveAgent[];
   currentPhase: string;
+  startedAt?: number;
   logPath?: string;
   parallelToolsActive?: boolean;
   totalTokens?: number;
+  tokenSamples?: Array<{ time: number; tokens: number }>;
   totalToolCalls?: number;
   stageNumber?: number;
   filesRead?: number;
@@ -88,6 +90,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _generationStartAt: number = 0;
   private _lastGenerationError: string | null = null;
   private _lastTokenCharCount: number = 0;
+  private _tokenSamples: Array<{ time: number; tokens: number }> = [];
   private _activeDebugLogPath: string | null = null;
   private _lastLogFlushAt: number = 0;
   private _parallelFireTimeout: NodeJS.Timeout | null = null;
@@ -149,6 +152,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     this._recentFilesRead = [];
     this._generationStartAt = Date.now();
     this._lastTokenCharCount = 0;
+    this._tokenSamples = [];
     this._lastLogFlushAt = 0;
     if (this._parallelFireTimeout) {
       clearTimeout(this._parallelFireTimeout);
@@ -179,7 +183,31 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     const chars = deltaText.length;
     this._lastTokenCharCount += chars;
     const estimatedTokens = Math.max(1, Math.ceil(chars / 4));
+    this._recordTokenEstimate(estimatedTokens);
+  }
+
+  private _recordTokenEstimate(estimatedTokens: number) {
+    if (!this._progress || !Number.isFinite(estimatedTokens) || estimatedTokens <= 0) {
+      return;
+    }
     this._progress.totalTokens = (this._progress.totalTokens || 0) + estimatedTokens;
+    const now = Date.now();
+    this._tokenSamples.push({ time: now, tokens: estimatedTokens });
+    const cutoff = now - 4000;
+    if (this._tokenSamples.length > 80 || (this._tokenSamples[0] && this._tokenSamples[0].time < cutoff)) {
+      this._tokenSamples = this._tokenSamples.filter((s) => s.time >= cutoff);
+    }
+    this._progress.tokenSamples = [...this._tokenSamples];
+  }
+
+  private _recordToolTokenEstimate(args: string, result: string) {
+    const combined = `${args ?? ''}${result ?? ''}`;
+    if (!combined) {
+      return;
+    }
+    const cappedLength = Math.min(2000, combined.length);
+    const estimatedTokens = Math.max(1, Math.ceil(cappedLength / 4));
+    this._recordTokenEstimate(estimatedTokens);
   }
 
   private _getModelId(): string {
@@ -539,6 +567,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         { id: 'mermaid', label: `${actionLabel} Mermaid diagram...`, startTime: Date.now() },
       ],
       currentPhase: `${actionLabel} Mermaid diagram...`,
+      startedAt: this._generationStartAt,
       totalTokens: 0,
       totalToolCalls: 0,
       stageNumber: 6,
@@ -626,6 +655,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       completedStages: 0,
       activeAgents: [{ id: `trace-${traceId}`, label: `Retrying Trace ${traceId}...`, startTime: Date.now() }],
       currentPhase: 'Retrying trace...',
+      startedAt: this._generationStartAt,
       totalTokens: 0,
       totalToolCalls: 0,
       stageNumber: 3,
@@ -656,6 +686,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           if (this._progress) {
             this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
             this._recordToolCall(tool, args ?? '', result ?? '');
+            this._recordToolTokenEstimate(args ?? '', result ?? '');
           }
           this._updateWebview();
         },
@@ -749,6 +780,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       completedStages: 0,
       activeAgents: [{ id: 'retry-all', label: 'Retrying all traces...', startTime: Date.now() }],
       currentPhase: 'Retrying all traces...',
+      startedAt: this._generationStartAt,
       totalTokens: 0,
       totalToolCalls: 0,
       stageNumber: 3,
@@ -777,6 +809,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
               if (this._progress) {
                 this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
                 this._recordToolCall(tool, args ?? '', result ?? '');
+                this._recordToolTokenEstimate(args ?? '', result ?? '');
               }
               this._updateWebview();
             },
@@ -915,6 +948,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     this._codemap = null;
     this._lastGenerationError = null;
     let suppressFailureSave = false;
+    let codemapSaved = false;
     this._resetProgressStats();
     
     // Initialize progress state
@@ -929,6 +963,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         startTime: Date.now(),
       }],
       currentPhase: 'Starting codemap generation...',
+      startedAt: this._generationStartAt,
       totalTokens: 0,
       totalToolCalls: 0,
       toolBreakdown: { ...this._toolUsage },
@@ -963,6 +998,12 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         if (this._progress) {
           this._progress.totalToolCalls = (this._progress.totalToolCalls || 0) + 1;
           this._recordToolCall(tool, args, result);
+          this._recordToolTokenEstimate(args, result);
+          if (this._progress.stageNumber === 1) {
+            const expectedStage1Tools = 13;
+            const ratio = Math.min(1, (this._progress.totalToolCalls || 0) / expectedStage1Tools);
+            this._progress.completedStages = Math.max(this._progress.completedStages, ratio);
+          }
         }
 
         this._messages.push({
@@ -1149,6 +1190,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         logger.info('Saving codemap to storage...');
         const savedPath = saveCodemap(updatedCodemap);
         logger.info(`Codemap saved to: ${savedPath}`);
+        codemapSaved = true;
         
         // Extract filename from path and track it
         const filename = savedPath.split(/[/\\]/).pop() || savedPath;
@@ -1175,7 +1217,9 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         
         this._updateWebview();
       } else {
-        logger.warn('No codemap was generated (this._codemap is null)');
+        const msg = 'No codemap was generated (this._codemap is null)';
+        logger.warn(msg);
+        this._lastGenerationError = this._lastGenerationError || msg;
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1233,31 +1277,48 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
           if (this._activeDebugLogPath) {
             logger.writeCaptureToFile(this._activeDebugLogPath, captured);
           }
-          if (this._codemap) {
+          const baseCodemap = this._codemap;
+          if (baseCodemap) {
             this._codemap = {
-              ...this._codemap,
+              ...baseCodemap,
               debugLogPath: logPath,
               updatedAt: new Date().toISOString(),
             };
             if (this._currentCodemapFilename) {
               updateCodemap(this._currentCodemapFilename, this._codemap);
             }
-          } else if (!suppressFailureSave && this._lastGenerationError) {
+          }
+          if (!suppressFailureSave && this._lastGenerationError && !codemapSaved) {
             const metadata = this._buildCodemapMetadata(workspaceRoot);
             const cancelled = this._lastGenerationError.toLowerCase().includes('cancelled');
-            const failedCodemap: Codemap = {
-              title: `${cancelled ? 'Cancelled' : 'Failed'} codemap: ${query}`,
-              description: cancelled
-                ? 'Generation cancelled by user'
-                : `Generation failed: ${this._lastGenerationError}`,
-              traces: [],
-              debugLogPath: logPath,
-              metadata,
-              query,
-              mode,
-              detailLevel,
-              updatedAt: new Date().toISOString(),
-            };
+            const failureDescription = cancelled
+              ? 'Generation cancelled by user'
+              : `Generation failed: ${this._lastGenerationError}`;
+            const failedCodemap: Codemap = baseCodemap
+              ? {
+                  ...baseCodemap,
+                  title: `${cancelled ? 'Cancelled' : 'Failed'} codemap: ${query}`,
+                  description: baseCodemap.description
+                    ? `${baseCodemap.description}\n\n${failureDescription}`
+                    : failureDescription,
+                  debugLogPath: logPath,
+                  metadata,
+                  query,
+                  mode,
+                  detailLevel,
+                  updatedAt: new Date().toISOString(),
+                }
+              : {
+                  title: `${cancelled ? 'Cancelled' : 'Failed'} codemap: ${query}`,
+                  description: failureDescription,
+                  traces: [],
+                  debugLogPath: logPath,
+                  metadata,
+                  query,
+                  mode,
+                  detailLevel,
+                  updatedAt: new Date().toISOString(),
+                };
             const savedPath = saveCodemap(failedCodemap);
             const filename = savedPath.split(/[/\\]/).pop() || savedPath;
             this._currentCodemapFilename = filename;

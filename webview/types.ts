@@ -91,9 +91,11 @@ export interface ProgressState {
   completedStages: number;
   activeAgents: ActiveAgent[];
   currentPhase: string;
+  startedAt?: number;
   logPath?: string;
   parallelToolsActive?: boolean;
   totalTokens?: number;
+  tokenSamples?: Array<{ time: number; tokens: number }>;
   totalToolCalls?: number;
   stageNumber?: number;
   filesRead?: number;

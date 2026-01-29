@@ -67,11 +67,18 @@ function loadGitignore(workspaceRoot: string): ReturnType<typeof ignore> {
   return ig;
 }
 
+function resolveWorkspacePath(workspaceRoot: string, targetPath: string): string {
+  return path.isAbsolute(targetPath)
+    ? targetPath
+    : path.resolve(workspaceRoot, targetPath);
+}
+
 function normalizeRelativePath(workspaceRoot: string, targetPath: string): string | null {
-  if (path.resolve(workspaceRoot) === path.resolve(targetPath)) {
+  const resolvedTarget = resolveWorkspacePath(workspaceRoot, targetPath);
+  if (path.resolve(workspaceRoot) === path.resolve(resolvedTarget)) {
     return '';
   }
-  const relative = path.relative(workspaceRoot, targetPath);
+  const relative = path.relative(workspaceRoot, resolvedTarget);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     return null;
   }
@@ -80,6 +87,9 @@ function normalizeRelativePath(workspaceRoot: string, targetPath: string): strin
 
 function isPathAllowed(workspaceRoot: string, targetPath: string, ig: ReturnType<typeof ignore>): boolean {
   const relative = normalizeRelativePath(workspaceRoot, targetPath);
+  if (relative === '') {
+    return true;
+  }
   if (!relative) {
     return false;
   }
@@ -93,14 +103,15 @@ function readFileInternal(file_path: string, offset?: number, limit?: number): s
       return 'Error: Workspace root not available.';
     }
     const ig = loadGitignore(workspaceRoot);
-    if (!isPathAllowed(workspaceRoot, file_path, ig)) {
+    const resolvedPath = resolveWorkspacePath(workspaceRoot, file_path);
+    if (!isPathAllowed(workspaceRoot, resolvedPath, ig)) {
       return `Error: File is outside workspace or ignored: ${file_path}`;
     }
-    if (!fs.existsSync(file_path)) {
-      return `Error: File not found: ${file_path}`;
+    if (!fs.existsSync(resolvedPath)) {
+      return `Error: File not found: ${resolvedPath}`;
     }
     
-    const stat = fs.statSync(file_path);
+    const stat = fs.statSync(resolvedPath);
     if (stat.size > MAX_READ_BYTES * 4) {
       // Large file - require offset/limit
       if (!offset || !limit) {
@@ -108,7 +119,7 @@ function readFileInternal(file_path: string, offset?: number, limit?: number): s
       }
     }
     
-    const content = fs.readFileSync(file_path, 'utf-8');
+    const content = fs.readFileSync(resolvedPath, 'utf-8');
     const lines = content.split('\n');
     
     const startLine = (offset ?? 1) - 1;
@@ -121,7 +132,7 @@ function readFileInternal(file_path: string, offset?: number, limit?: number): s
       return `${String(lineNum).padStart(6)}→${truncated}`;
     });
     
-    return `<file name="${file_path}" start_line="${startLine + 1}" end_line="${endLine}" full_length="${lines.length}">\n${numberedLines.join('\n')}\n</file>`;
+    return `<file name="${resolvedPath}" start_line="${startLine + 1}" end_line="${endLine}" full_length="${lines.length}">\n${numberedLines.join('\n')}\n</file>`;
   } catch (error) {
     return `Error reading file: ${error}`;
   }
@@ -169,20 +180,21 @@ export const listDirTool = tool({
     const outputs: string[] = [];
     for (const DirectoryPath of directories) {
       try {
-        if (!isPathAllowed(workspaceRoot, DirectoryPath, ig)) {
+        const resolvedDir = resolveWorkspacePath(workspaceRoot, DirectoryPath);
+        if (!isPathAllowed(workspaceRoot, resolvedDir, ig)) {
           outputs.push(`Error: Directory is outside workspace or ignored: ${DirectoryPath}`);
           continue;
         }
-        if (!fs.existsSync(DirectoryPath)) {
-          outputs.push(`Error: Directory not found: ${DirectoryPath}`);
+        if (!fs.existsSync(resolvedDir)) {
+          outputs.push(`Error: Directory not found: ${resolvedDir}`);
           continue;
         }
         
-        const entries = fs.readdirSync(DirectoryPath, { withFileTypes: true });
-        const results: string[] = [`${DirectoryPath}/`];
+        const entries = fs.readdirSync(resolvedDir, { withFileTypes: true });
+        const results: string[] = [`${resolvedDir}/`];
         
         for (const entry of entries.slice(0, 50)) {
-          const fullPath = path.join(DirectoryPath, entry.name);
+          const fullPath = path.join(resolvedDir, entry.name);
           if (!isPathAllowed(workspaceRoot, fullPath, ig)) {
             continue;
           }
@@ -244,7 +256,8 @@ export const grepSearchTool = tool({
     for (const search of searches) {
       const { SearchPath, Query, CaseSensitive, IsRegex, Includes, MatchPerLine } = search;
       try {
-        if (!isPathAllowed(workspaceRoot, SearchPath, ig)) {
+        const resolvedSearchPath = resolveWorkspacePath(workspaceRoot, SearchPath);
+        if (!isPathAllowed(workspaceRoot, resolvedSearchPath, ig)) {
           outputs.push(`Error: Search path is outside workspace or ignored: ${SearchPath}`);
           continue;
         }
@@ -320,15 +333,15 @@ export const grepSearchTool = tool({
           return allMatches;
         };
         
-        const stat = fs.statSync(SearchPath);
+        const stat = fs.statSync(resolvedSearchPath);
         if (stat.isFile()) {
-          results.push(...searchInFile(SearchPath));
+          results.push(...searchInFile(resolvedSearchPath));
         } else {
-          results.push(...walkDir(SearchPath));
+          results.push(...walkDir(resolvedSearchPath));
         }
         
         if (results.length === 0) {
-          outputs.push(`No matches found for "${Query}" in ${SearchPath}`);
+          outputs.push(`No matches found for "${Query}" in ${resolvedSearchPath}`);
           continue;
         }
         
@@ -367,7 +380,8 @@ export const findByNameTool = tool({
     for (const search of searches) {
       const { SearchDirectory, Pattern, Type, MaxDepth, Extensions } = search;
       try {
-        if (!isPathAllowed(workspaceRoot, SearchDirectory, ig)) {
+        const resolvedSearchDir = resolveWorkspacePath(workspaceRoot, SearchDirectory);
+        if (!isPathAllowed(workspaceRoot, resolvedSearchDir, ig)) {
           outputs.push(`Error: Search directory is outside workspace or ignored: ${SearchDirectory}`);
           continue;
         }
@@ -426,10 +440,10 @@ export const findByNameTool = tool({
           }
         };
         
-        walkDir(SearchDirectory);
+        walkDir(resolvedSearchDir);
         
         if (results.length === 0) {
-          outputs.push(`Found 0 results for pattern "${Pattern}" in ${SearchDirectory}`);
+          outputs.push(`Found 0 results for pattern "${Pattern}" in ${resolvedSearchDir}`);
           continue;
         }
         

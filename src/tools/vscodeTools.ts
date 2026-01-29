@@ -2,6 +2,67 @@ import * as vscode from 'vscode';
 import { tool } from 'ai';
 import { z } from 'zod';
 
+type JsonSchema = {
+  type?: string;
+  properties?: Record<string, unknown>;
+  required?: string[];
+};
+
+function parseXmlParameters(text: string): Record<string, string> | null {
+  const params: Record<string, string> = {};
+  const regex = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/gi;
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(text))) {
+    const key = match[1]?.trim();
+    const value = match[2]?.trim();
+    if (key) {
+      params[key] = value ?? '';
+    }
+  }
+  return Object.keys(params).length > 0 ? params : null;
+}
+
+function coerceToolInput(schema: JsonSchema | undefined, input: unknown): unknown {
+  const properties = schema?.properties ? Object.keys(schema.properties) : [];
+  const required = Array.isArray(schema?.required) ? schema!.required! : [];
+  const preferredKey =
+    ['query', 'search', 'q', 'text', 'pattern'].find((k) => properties.includes(k)) ||
+    (required.length === 1 ? required[0] : undefined) ||
+    (properties.length === 1 ? properties[0] : undefined);
+
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.length > 0) {
+      // Try JSON first.
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          return JSON.parse(trimmed);
+        } catch {
+          // Fall through.
+        }
+      }
+      // Try XML parameter format.
+      const xmlParams = parseXmlParameters(trimmed);
+      if (xmlParams) {
+        return xmlParams;
+      }
+      if (preferredKey) {
+        return { [preferredKey]: trimmed };
+      }
+    }
+  }
+
+  if (input && typeof input === 'object') {
+    return input;
+  }
+
+  if (preferredKey) {
+    return { [preferredKey]: '' };
+  }
+
+  return input ?? {};
+}
+
 /**
  * Wraps a VS Code LM Tool into an AI SDK compatible tool.
  */
@@ -16,11 +77,16 @@ export function wrapVsCodeTool(info: vscode.LanguageModelToolInformation) {
     // or just pass the schema if the library supports it.
     inputSchema: z.any().describe(JSON.stringify(info.inputSchema)),
     execute: async (input) => {
+      const coercedInput = coerceToolInput(info.inputSchema as JsonSchema | undefined, input);
+      const toolInput =
+        coercedInput && typeof coercedInput === 'object'
+          ? coercedInput
+          : { value: coercedInput ?? '' };
       try {
         const result = await vscode.lm.invokeTool(
           info.name,
           {
-            input,
+            input: toolInput,
             toolInvocationToken: undefined as any,
             tokenizationOptions: {
               tokenBudget: 4000,

@@ -754,69 +754,87 @@ export async function generateCodemap(
     if (abortSignal?.aborted) throw new Error('Generation cancelled');
 
     logger.info('Stage 2 - Calling API...');
-    const stage2Result = await runStreamedToolLoop({
-      label: 'Stage 2 Structure',
-      systemPrompt,
-      messages,
-      client,
-      callbacks,
-      abortSignal,
-      maxRounds: 1,
-      maxParallelTools: mode === 'fast' ? 6 : 4,
-    });
-    logger.info(`Stage 2 - API response received: text=${!!stage2Result.text}`);
+    const maxStage2Attempts = 3;
+    for (let attempt = 1; attempt <= maxStage2Attempts; attempt++) {
+      const retryHint = attempt === 1
+        ? ''
+        : '\n\nIMPORTANT: Output ONLY <CODEMAP>...</CODEMAP> containing valid JSON. No plans, no markdown, no extra text.';
+      if (attempt > 1) {
+        messages.push({
+          role: 'user',
+          content:
+            `Your previous response did not include a valid <CODEMAP> JSON block. Please fix and return ONLY the codemap JSON.\n${retryHint}`,
+        });
+        callbacks.onMessage?.('user', `[Stage 2] Retrying codemap extraction (attempt ${attempt}/${maxStage2Attempts})...`);
+      }
 
-    if (stage2Result.text) {
+      const stage2Result = await runStreamedToolLoop({
+        label: `Stage 2 Structure${attempt > 1 ? ` Attempt ${attempt}` : ''}`,
+        systemPrompt,
+        messages,
+        client,
+        callbacks,
+        abortSignal,
+        maxRounds: 1,
+        maxParallelTools: mode === 'fast' ? 6 : 4,
+      });
+      logger.info(`Stage 2 - API response received: text=${!!stage2Result.text}`);
+
+      if (!stage2Result.text) {
+        logger.error('Stage 2 - No text in API response!');
+        continue;
+      }
+
       logger.agentRaw(`[Stage 2 Structure] RESPONSE:\n${stage2Result.text}`);
       logger.debug(`Stage 2 - Response text length: ${stage2Result.text.length}`);
-      
+
       logger.info('Stage 2 - Extracting codemap from response...');
       const extracted = extractCodemapFromResponse(stage2Result.text);
-      if (extracted) {
-        resultCodemap = extracted;
-        logger.info(`Stage 2 - Codemap extracted successfully: ${resultCodemap.traces.length} traces`);
-        logger.debug(`Stage 2 - Codemap title: ${resultCodemap.title}`);
-        for (const trace of resultCodemap.traces) {
-          logger.debug(`Stage 2 - Trace ${trace.id}: ${trace.title} (${trace.locations.length} locations)`);
-        }
-        callbacks.onCodemapUpdate?.(resultCodemap);
-        callbacks.onMessage?.('system', `Codemap structure generated with ${resultCodemap.traces.length} traces`);
-
-        // Persist stage 1-2 shared context for retries (before we fork into downstream stages).
-        try {
-          callbacks.onStage12ContextReady?.({
-            schemaVersion: 1,
-            createdAt: new Date().toISOString(),
-            query,
-            mode,
-            detailLevel,
-            workspaceRoot,
-            currentDate,
-            language,
-            systemPrompt,
-            baseMessages: messages.map((m) => ({
-              role: m.role as 'user' | 'assistant',
-              content: String(m.content),
-            })),
-          });
-        } catch (e) {
-          logger.warn(`Failed to emit stage12 context: ${e instanceof Error ? e.message : String(e)}`);
-        }
-
-        mermaidPromise = processMermaidDiagram(
-          systemPrompt,
-          messages,
-          currentDate,
-          language,
-          callbacks,
-          abortSignal
-        );
-      } else {
+      if (!extracted) {
         logger.error('Stage 2 - FAILED to extract codemap from response!');
         logger.error(`Stage 2 - Response preview: ${stage2Result.text.slice(0, 500)}...`);
+        continue;
       }
-    } else {
-      logger.error('Stage 2 - No text in API response!');
+
+      resultCodemap = extracted;
+      logger.info(`Stage 2 - Codemap extracted successfully: ${resultCodemap.traces.length} traces`);
+      logger.debug(`Stage 2 - Codemap title: ${resultCodemap.title}`);
+      for (const trace of resultCodemap.traces) {
+        logger.debug(`Stage 2 - Trace ${trace.id}: ${trace.title} (${trace.locations.length} locations)`);
+      }
+      callbacks.onCodemapUpdate?.(resultCodemap);
+      callbacks.onMessage?.('system', `Codemap structure generated with ${resultCodemap.traces.length} traces`);
+
+      // Persist stage 1-2 shared context for retries (before we fork into downstream stages).
+      try {
+        callbacks.onStage12ContextReady?.({
+          schemaVersion: 1,
+          createdAt: new Date().toISOString(),
+          query,
+          mode,
+          detailLevel,
+          workspaceRoot,
+          currentDate,
+          language,
+          systemPrompt,
+          baseMessages: messages.map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: String(m.content),
+          })),
+        });
+      } catch (e) {
+        logger.warn(`Failed to emit stage12 context: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      mermaidPromise = processMermaidDiagram(
+        systemPrompt,
+        messages,
+        currentDate,
+        language,
+        callbacks,
+        abortSignal
+      );
+      break;
     }
 
     // ========== Stage 3-5: Parallel Trace Processing ==========

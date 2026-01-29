@@ -31,6 +31,55 @@ export const CodemapList: React.FC<CodemapListProps> = ({
 }) => {
   const [searchText, setSearchText] = useState('');
   const [activeAgentIndex, setActiveAgentIndex] = useState(0);
+  const [tick, setTick] = useState(() => Date.now());
+  const [completionHoldUntil, setCompletionHoldUntil] = useState(0);
+  const [lastProgressSnapshot, setLastProgressSnapshot] = useState<ProgressState | undefined>(undefined);
+
+  const ScrambleText: React.FC<{ text: string; active?: boolean; className?: string }> = ({
+    text,
+    active = false,
+    className,
+  }) => {
+    const [display, setDisplay] = useState(text);
+
+    useEffect(() => {
+      if (!active) {
+        setDisplay(text);
+        return;
+      }
+      const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const durationMs = 1400;
+      const delayMs = 1200;
+      const start = Date.now();
+      const interval = setInterval(() => {
+        const now = Date.now();
+        if (now - start < delayMs) {
+          setDisplay('');
+          return;
+        }
+        const elapsed = now - start - delayMs;
+        const progress = Math.min(1, elapsed / durationMs);
+        const revealCount = Math.min(text.length, Math.max(1, Math.floor(text.length * progress)));
+        let next = '';
+        for (let i = 0; i < text.length; i++) {
+          if (i < revealCount - 1) {
+            next += text[i];
+          } else if (i === revealCount - 1) {
+            const rand = Math.floor(Math.random() * charset.length);
+            next += charset[rand];
+          }
+        }
+        setDisplay(next);
+        if (progress >= 1) {
+          clearInterval(interval);
+          setDisplay(text);
+        }
+      }, 40);
+      return () => clearInterval(interval);
+    }, [text, active]);
+
+    return <span className={className}>{display}</span>;
+  };
 
   // Rotate through active agents every 2 seconds
   useEffect(() => {
@@ -45,6 +94,16 @@ export const CodemapList: React.FC<CodemapListProps> = ({
 
     return () => clearInterval(interval);
   }, [progress?.activeAgents.length]);
+
+  useEffect(() => {
+    if (!isProcessing) {
+      return;
+    }
+    const interval = setInterval(() => {
+      setTick(Date.now());
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isProcessing]);
 
   const filteredHistory = useMemo(() => {
     if (!searchText.trim()) {
@@ -106,11 +165,48 @@ export const CodemapList: React.FC<CodemapListProps> = ({
   const progressPercent = progress
     ? Math.round((progress.completedStages / progress.totalStages) * 100)
     : 0;
+  const progressComplete = progressPercent >= 100;
+  const showCompletion = !isProcessing && Date.now() < completionHoldUntil && lastProgressSnapshot;
+  const displayProgress = showCompletion ? lastProgressSnapshot : progress;
+  const displayPercent = displayProgress
+    ? Math.round((displayProgress.completedStages / displayProgress.totalStages) * 100)
+    : 0;
+  const displayComplete = displayPercent >= 100;
 
   // Get current active agent label
   const currentAgentLabel = progress?.activeAgents[activeAgentIndex]?.label || progress?.currentPhase || 'Processing...';
   const lastFileName = progress?.lastFile ? progress.lastFile.split(/[\\/]/).pop() : '';
   const recentFiles = progress?.recentFiles || [];
+  const tpsMax = 1000;
+  const tpsFireThreshold = 100;
+  const tpsBoostThreshold = 200;
+  const tps = useMemo(() => {
+    if (!progress?.tokenSamples || progress.tokenSamples.length === 0) return 0;
+    const windowMs = 2000;
+    const cutoff = tick - windowMs;
+    const samples = progress.tokenSamples.filter((s) => s.time >= cutoff);
+    if (samples.length === 0) return 0;
+    const tokensInWindow = samples.reduce((sum, s) => sum + s.tokens, 0);
+    const earliest = Math.min(...samples.map((s) => s.time));
+    const windowSeconds = Math.max(0.5, (tick - earliest) / 1000);
+    return tokensInWindow / windowSeconds;
+  }, [progress?.tokenSamples, tick]);
+  const tpsClamped = Math.min(tpsMax, Math.max(0, tps));
+  const tpsAngle = -90 + (tpsClamped / tpsMax) * 180;
+  const isStage1 = progress?.stageNumber === 1;
+  const showTps = Boolean(!isStage1 && progress?.totalTokens !== undefined && progress.totalTokens > 0);
+  const showFire = Boolean(!isStage1 && (progress?.parallelToolsActive || tps >= tpsFireThreshold) && isProcessing);
+  const tpsBoost = Boolean(tps >= tpsBoostThreshold);
+  const fireIntensity = Math.min(1, Math.max(0, tpsClamped / tpsMax));
+  const fireRedness = Math.min(1, Math.pow(fireIntensity, 0.6));
+
+  useEffect(() => {
+    if (!isProcessing && progressComplete && progress) {
+      const now = Date.now();
+      setLastProgressSnapshot({ ...progress, completedStages: progress.totalStages });
+      setCompletionHoldUntil(now + 1200);
+    }
+  }, [isProcessing, progressComplete, progress]);
 
   return (
     <div className="codemap-list-section">
@@ -129,8 +225,18 @@ export const CodemapList: React.FC<CodemapListProps> = ({
       </div>
 
       {/* Processing indicator with progress */}
-      {isProcessing && (
-        <div className={`codemap-item processing-item ${progress?.parallelToolsActive ? 'parallel-fire' : ''}`}>
+      {(isProcessing || showCompletion) && (
+        <div
+          className={`codemap-item processing-item ${showFire ? 'parallel-fire' : ''} ${
+            tpsBoost ? 'tps-boost' : ''
+          }`}
+          style={{
+            ...(showFire ? {
+              ['--fire-intensity' as any]: fireIntensity.toFixed(2),
+              ['--fire-redness' as any]: fireRedness.toFixed(2),
+            } : {}),
+          }}
+        >
           <div className="codemap-item-header">
             <span className="codemap-item-title">
               Generating...
@@ -150,11 +256,11 @@ export const CodemapList: React.FC<CodemapListProps> = ({
           <div className="progress-container">
             <div className="progress-bar">
               <div
-                className="progress-fill"
-                style={{ width: `${progressPercent}%` }}
+                className={`progress-fill${displayComplete ? ' progress-complete' : ''}`}
+                style={{ width: `${displayPercent}%` }}
               />
             </div>
-            <span className="progress-text">{progressPercent}%</span>
+            <span className="progress-text">{displayPercent}%</span>
           </div>
 
           {/* Rotating status text */}
@@ -165,64 +271,74 @@ export const CodemapList: React.FC<CodemapListProps> = ({
             </div>
 
             <div className="status-activity">
-              {progress?.totalToolCalls !== undefined && progress.totalToolCalls > 0 && (
+              {displayProgress?.totalToolCalls !== undefined && displayProgress.totalToolCalls > 0 && (
                 <div className="tool-indicator" title="Tools used">
                   <RefreshCw size={10} className="spinning" />
-                  <span>{progress.totalToolCalls}</span>
+                  <span>{displayProgress.totalToolCalls}</span>
                 </div>
               )}
 
-              {progress?.totalTokens !== undefined && progress.totalTokens > 0 && (
+              {showTps && (
+                <div className="tps-indicator" title="Tokens per second">
+                  <div className="tps-gauge">
+                    <span className="tps-needle" style={{ transform: `translateX(-50%) rotate(${tpsAngle}deg)` }} />
+                    <span className="tps-center" />
+                  </div>
+                  <span className="tps-value">{Math.round(tpsClamped)} tps</span>
+                </div>
+              )}
+
+              {displayProgress?.totalTokens !== undefined && displayProgress.totalTokens > 0 && (
                 <div className="token-counter">
                   <div className="token-stream">
-                    <div className={`token-particle ${progress.totalTokens % 3 === 0 ? 'active' : ''}`} />
-                    <div className={`token-particle ${progress.totalTokens % 3 === 1 ? 'active' : ''}`} />
-                    <div className={`token-particle ${progress.totalTokens % 3 === 2 ? 'active' : ''}`} />
+                    <div className={`token-particle ${displayProgress.totalTokens % 3 === 0 ? 'active' : ''}`} />
+                    <div className={`token-particle ${displayProgress.totalTokens % 3 === 1 ? 'active' : ''}`} />
+                    <div className={`token-particle ${displayProgress.totalTokens % 3 === 2 ? 'active' : ''}`} />
                   </div>
-                  <span>{progress.totalTokens.toLocaleString()} tokens</span>
+                  <span>{displayProgress.totalTokens.toLocaleString()} tokens</span>
                 </div>
               )}
             </div>
           </div>
 
           <div className="progress-meta">
-            {progress?.stageNumber !== undefined && (
+            {displayProgress?.stageNumber !== undefined && (
               <div className="meta-chip" title="Current stage">
                 <span className="meta-label">Stage</span>
-                <span className="meta-value">{progress.stageNumber}</span>
+                <span className="meta-value">{displayProgress.stageNumber}</span>
               </div>
             )}
-            {progress?.filesRead !== undefined && progress.filesRead > 0 && (
+            {displayProgress?.filesRead !== undefined && displayProgress.filesRead > 0 && (
               <div className="meta-chip" title="Files read">
                 <span className="meta-label">Files</span>
-                <span className="meta-value">{progress.filesRead}</span>
+                <span className="meta-value">{displayProgress.filesRead}</span>
               </div>
             )}
-            {progress?.linesRead !== undefined && progress.linesRead > 0 && (
+            {displayProgress?.linesRead !== undefined && displayProgress.linesRead > 0 && (
               <div className="meta-chip" title="Lines read">
                 <span className="meta-label">Lines</span>
-                <span className="meta-value">{progress.linesRead.toLocaleString()}</span>
+                <span className="meta-value">{displayProgress.linesRead.toLocaleString()}</span>
               </div>
             )}
-            {progress?.toolBreakdown && (progress.toolBreakdown.internal + progress.toolBreakdown.vscode) > 0 && (
+            {displayProgress?.toolBreakdown && (displayProgress.toolBreakdown.internal + displayProgress.toolBreakdown.vscode) > 0 && (
               <div className="meta-chip" title="Tools used (internal / VS Code)">
                 <span className="meta-label">Tools</span>
                 <span className="meta-value">
-                  {progress.toolBreakdown.internal}/{progress.toolBreakdown.vscode}
+                  {displayProgress.toolBreakdown.internal}/{displayProgress.toolBreakdown.vscode}
                 </span>
               </div>
             )}
           </div>
 
-          {progress?.lastFile && (
-            <div className="progress-file" title={progress.lastFile}>
-              Reading: <span className="mono">{lastFileName || progress.lastFile}</span>
+          {displayProgress?.lastFile && (
+            <div className="progress-file" title={displayProgress.lastFile}>
+              Reading: <span className="mono">{lastFileName || displayProgress.lastFile}</span>
             </div>
           )}
 
-          {progress?.lastTool && (
-            <div className="progress-tool" title={progress.lastTool}>
-              Tool: <span className="mono">{progress.lastTool}</span>
+          {displayProgress?.lastTool && (
+            <div className="progress-tool" title={displayProgress.lastTool}>
+              Tool: <span className="mono">{displayProgress.lastTool}</span>
             </div>
           )}
 
@@ -254,7 +370,7 @@ export const CodemapList: React.FC<CodemapListProps> = ({
         filteredHistory.map((item) => (
           <div
             key={item.id}
-            className={`codemap-item ${isCurrentCodemap(item) ? 'active' : ''}`}
+            className={`codemap-item ${isCurrentCodemap(item) ? 'active' : ''} ${item.isUnread ? 'unread' : ''}`}
             onClick={() => onLoadHistory(item.id)}
           >
             <div className="codemap-item-header">
@@ -289,9 +405,12 @@ export const CodemapList: React.FC<CodemapListProps> = ({
               </div>
             </div>
             <div className="codemap-item-desc">
-              {item.codemap.description.length > 100
-                ? `${item.codemap.description.slice(0, 100)}...`
-                : item.codemap.description}
+              <ScrambleText
+                text={item.codemap.description.length > 100
+                  ? `${item.codemap.description.slice(0, 100)}...`
+                  : item.codemap.description}
+                active={Boolean(item.isUnread)}
+              />
             </div>
             <div className="codemap-item-time">{formatTime(item.timestamp)}</div>
             {item.codemap.metadata?.totalTokens !== undefined && (
