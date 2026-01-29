@@ -3,12 +3,12 @@
  * Implements tools similar to Windsurf's Cascade
  */
 
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import ignore from 'ignore';
 import { z } from 'zod';
 import { tool } from 'ai';
+import { getActiveWorkspaceRoot, findWorkspaceRootForPath } from '../workspace';
 
 const MAX_READ_LINES = 500;
 const MAX_READ_BYTES = 32000;
@@ -31,8 +31,11 @@ const DEFAULT_IGNORED_PATTERNS = [
 
 const ignoreCache = new Map<string, ReturnType<typeof ignore>>();
 
-function getWorkspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+function getWorkspaceRoot(targetPath?: string): string | undefined {
+  if (targetPath && path.isAbsolute(targetPath)) {
+    return findWorkspaceRootForPath(targetPath) || getActiveWorkspaceRoot();
+  }
+  return getActiveWorkspaceRoot();
 }
 
 function loadGitignore(workspaceRoot: string): ReturnType<typeof ignore> {
@@ -98,7 +101,7 @@ function isPathAllowed(workspaceRoot: string, targetPath: string, ig: ReturnType
 
 function readFileInternal(file_path: string, offset?: number, limit?: number): string {
   try {
-    const workspaceRoot = getWorkspaceRoot();
+    const workspaceRoot = getWorkspaceRoot(file_path);
     if (!workspaceRoot) {
       return 'Error: Workspace root not available.';
     }
@@ -172,14 +175,15 @@ export const listDirTool = tool({
     directories: z.array(z.string().describe('Absolute path to the directory to list')),
   }),
   execute: async ({ directories }) => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      return 'Error: Workspace root not available.';
-    }
-    const ig = loadGitignore(workspaceRoot);
     const outputs: string[] = [];
     for (const DirectoryPath of directories) {
       try {
+        const workspaceRoot = getWorkspaceRoot(DirectoryPath);
+        if (!workspaceRoot) {
+          outputs.push('Error: Workspace root not available.');
+          continue;
+        }
+        const ig = loadGitignore(workspaceRoot);
         const resolvedDir = resolveWorkspacePath(workspaceRoot, DirectoryPath);
         if (!isPathAllowed(workspaceRoot, resolvedDir, ig)) {
           outputs.push(`Error: Directory is outside workspace or ignored: ${DirectoryPath}`);
@@ -247,15 +251,16 @@ export const grepSearchTool = tool({
     })).describe('Array of search requests'),
   }),
   execute: async ({ searches }) => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      return 'Error: Workspace root not available.';
-    }
-    const ig = loadGitignore(workspaceRoot);
     const outputs: string[] = [];
     for (const search of searches) {
       const { SearchPath, Query, CaseSensitive, IsRegex, Includes, MatchPerLine } = search;
       try {
+        const workspaceRoot = getWorkspaceRoot(SearchPath);
+        if (!workspaceRoot) {
+          outputs.push('Error: Workspace root not available.');
+          continue;
+        }
+        const ig = loadGitignore(workspaceRoot);
         const resolvedSearchPath = resolveWorkspacePath(workspaceRoot, SearchPath);
         if (!isPathAllowed(workspaceRoot, resolvedSearchPath, ig)) {
           outputs.push(`Error: Search path is outside workspace or ignored: ${SearchPath}`);
@@ -371,15 +376,16 @@ export const findByNameTool = tool({
     })).describe('Array of find requests'),
   }),
   execute: async ({ searches }) => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      return 'Error: Workspace root not available.';
-    }
-    const ig = loadGitignore(workspaceRoot);
     const outputs: string[] = [];
     for (const search of searches) {
       const { SearchDirectory, Pattern, Type, MaxDepth, Extensions } = search;
       try {
+        const workspaceRoot = getWorkspaceRoot(SearchDirectory);
+        if (!workspaceRoot) {
+          outputs.push('Error: Workspace root not available.');
+          continue;
+        }
+        const ig = loadGitignore(workspaceRoot);
         const resolvedSearchDir = resolveWorkspacePath(workspaceRoot, SearchDirectory);
         if (!isPathAllowed(workspaceRoot, resolvedSearchDir, ig)) {
           outputs.push(`Error: Search directory is outside workspace or ignored: ${SearchDirectory}`);

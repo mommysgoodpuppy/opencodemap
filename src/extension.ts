@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { CodemapViewProvider } from './views/CodemapViewProvider';
 import { isConfigured, refreshConfig } from './agent';
 import { getStoragePath, listCodemaps } from './storage/codemapStorage';
+import { getActiveWorkspaceRoot } from './workspace';
 import { initLogger, initAgentLogger, info, show as showLogger, showRaw as showRawLogger } from './logger';
 import { CodemapChatModelProvider } from './lmProvider';
 import { pickVsCodeTools } from './tools/vscodeTools';
@@ -104,8 +105,9 @@ export function activate(context: vscode.ExtensionContext) {
 	// Command: Show Storage Path (for debugging)
 	context.subscriptions.push(
 		vscode.commands.registerCommand('codemap.showStoragePath', () => {
-			const storagePath = getStoragePath();
-			const codemaps = listCodemaps();
+			const workspaceRoot = getActiveWorkspaceRoot();
+			const storagePath = getStoragePath(workspaceRoot);
+			const codemaps = listCodemaps(workspaceRoot);
 			vscode.window.showInformationMessage(
 				`Codemap storage: ${storagePath}\nFound ${codemaps.length} saved codemap(s)`,
 				'Open Folder'

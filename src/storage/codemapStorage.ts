@@ -2,31 +2,29 @@
  * Codemap Storage - persists codemaps to ~/.cometix/codemap/<project>/
  */
 
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { Codemap } from '../types';
+import { getActiveWorkspaceRoot } from '../workspace';
 
 const COMETIX_DIR = '.cometix';
 const CODEMAP_SUBDIR = 'codemap';
 
-// Cache for storage directory to avoid repeated filesystem checks
-let cachedStorageDir: string | null = null;
-let cachedWorkspaceName: string | null = null;
+// Cache for storage directories to avoid repeated filesystem checks
+const cachedStorageDirs = new Map<string, string>();
 
 /**
  * Get the storage directory for the current workspace
  * Returns: ~/.cometix/codemap/<workspace-name>/
  */
-export function getCodemapStorageDir(): string {
-  const workspaceName = getWorkspaceName();
-  
-  // Return cached directory if workspace hasn't changed
-  if (cachedStorageDir && cachedWorkspaceName === workspaceName) {
-    return cachedStorageDir;
+export function getCodemapStorageDir(workspacePath?: string): string {
+  const workspaceName = getWorkspaceName(workspacePath);
+  const cached = cachedStorageDirs.get(workspaceName);
+  if (cached) {
+    return cached;
   }
-  
+
   const homeDir = os.homedir();
   const storageDir = path.join(homeDir, COMETIX_DIR, CODEMAP_SUBDIR, workspaceName);
   
@@ -35,9 +33,7 @@ export function getCodemapStorageDir(): string {
     fs.mkdirSync(storageDir, { recursive: true });
   }
   
-  // Update cache
-  cachedStorageDir = storageDir;
-  cachedWorkspaceName = workspaceName;
+  cachedStorageDirs.set(workspaceName, storageDir);
   
   return storageDir;
 }
@@ -45,15 +41,14 @@ export function getCodemapStorageDir(): string {
 /**
  * Get a sanitized workspace name for use as directory name
  */
-function getWorkspaceName(): string {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
+function getWorkspaceName(workspacePath?: string): string {
+  const resolvedPath = workspacePath || getActiveWorkspaceRoot();
+  if (!resolvedPath) {
     return 'default';
   }
-  
-  const workspacePath = workspaceFolders[0].uri.fsPath;
+
   // Use the last component of the path as the project name
-  const projectName = path.basename(workspacePath);
+  const projectName = path.basename(resolvedPath);
   // Sanitize: replace invalid chars with underscore
   return projectName.replace(/[<>:"/\\|?*]/g, '_');
 }
@@ -83,15 +78,16 @@ function generateDebugLogFilename(label: string): string {
 /**
  * Save a codemap to storage
  */
-export function saveCodemap(codemap: Codemap): string {
-  const storageDir = getCodemapStorageDir();
+export function saveCodemap(codemap: Codemap, workspacePath?: string): string {
+  const resolvedWorkspacePath = workspacePath || codemap.workspacePath || getActiveWorkspaceRoot() || '';
+  const storageDir = getCodemapStorageDir(resolvedWorkspacePath);
   const filename = generateCodemapFilename(codemap);
   const filePath = path.join(storageDir, filename);
   
   const data = {
     ...codemap,
     savedAt: new Date().toISOString(),
-    workspacePath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+    workspacePath: resolvedWorkspacePath,
   };
   
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
@@ -103,8 +99,9 @@ export function saveCodemap(codemap: Codemap): string {
  * Update an existing codemap file in-place.
  * Used when we want to add/refresh fields (e.g., mermaidDiagram) without creating a new history entry.
  */
-export function updateCodemap(filename: string, codemap: Codemap): boolean {
-  const storageDir = getCodemapStorageDir();
+export function updateCodemap(filename: string, codemap: Codemap, workspacePath?: string): boolean {
+  const resolvedWorkspacePath = workspacePath || codemap.workspacePath || getActiveWorkspaceRoot() || '';
+  const storageDir = getCodemapStorageDir(resolvedWorkspacePath);
   const filePath = path.join(storageDir, filename);
 
   try {
@@ -112,7 +109,7 @@ export function updateCodemap(filename: string, codemap: Codemap): boolean {
       ...codemap,
       savedAt: codemap.savedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      workspacePath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || codemap.workspacePath || '',
+      workspacePath: resolvedWorkspacePath,
     };
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
     return true;
@@ -124,8 +121,10 @@ export function updateCodemap(filename: string, codemap: Codemap): boolean {
 /**
  * List all saved codemaps for current workspace
  */
-export function listCodemaps(): Array<{ filename: string; codemap: Codemap & { savedAt: string } }> {
-  const storageDir = getCodemapStorageDir();
+export function listCodemaps(
+  workspacePath?: string
+): Array<{ filename: string; codemap: Codemap & { savedAt: string } }> {
+  const storageDir = getCodemapStorageDir(workspacePath);
   
   try {
     const files = fs.readdirSync(storageDir)
@@ -147,8 +146,11 @@ export function listCodemaps(): Array<{ filename: string; codemap: Codemap & { s
 /**
  * Load a specific codemap by filename
  */
-export function loadCodemap(filename: string): (Codemap & { savedAt: string }) | null {
-  const storageDir = getCodemapStorageDir();
+export function loadCodemap(
+  filename: string,
+  workspacePath?: string
+): (Codemap & { savedAt: string }) | null {
+  const storageDir = getCodemapStorageDir(workspacePath);
   const filePath = path.join(storageDir, filename);
   
   try {
@@ -162,8 +164,8 @@ export function loadCodemap(filename: string): (Codemap & { savedAt: string }) |
 /**
  * Delete a codemap by filename
  */
-export function deleteCodemap(filename: string): boolean {
-  const storageDir = getCodemapStorageDir();
+export function deleteCodemap(filename: string, workspacePath?: string): boolean {
+  const storageDir = getCodemapStorageDir(workspacePath);
   const filePath = path.join(storageDir, filename);
   
   try {
@@ -177,23 +179,23 @@ export function deleteCodemap(filename: string): boolean {
 /**
  * Get the full storage path for display
  */
-export function getStoragePath(): string {
-  return getCodemapStorageDir();
+export function getStoragePath(workspacePath?: string): string {
+  return getCodemapStorageDir(workspacePath);
 }
 
 /**
  * Get the full file path for a codemap by filename
  */
-export function getCodemapFilePath(filename: string): string {
-  const storageDir = getCodemapStorageDir();
+export function getCodemapFilePath(filename: string, workspacePath?: string): string {
+  const storageDir = getCodemapStorageDir(workspacePath);
   return path.join(storageDir, filename);
 }
 
 /**
  * Save a debug log to storage and return the full file path.
  */
-export function saveDebugLog(content: string, label: string = 'codemap'): string {
-  const storageDir = getCodemapStorageDir();
+export function saveDebugLog(content: string, label: string = 'codemap', workspacePath?: string): string {
+  const storageDir = getCodemapStorageDir(workspacePath);
   const filename = generateDebugLogFilename(label);
   const filePath = path.join(storageDir, filename);
   fs.writeFileSync(filePath, content, 'utf-8');

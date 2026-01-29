@@ -24,11 +24,11 @@ import {
   listCodemaps,
   deleteCodemap,
   loadCodemap,
-  getStoragePath,
   getCodemapFilePath,
   saveDebugLog,
   updateCodemap,
 } from '../storage/codemapStorage';
+import { pickWorkspaceRoot, getActiveWorkspaceRoot } from '../workspace';
 import * as logger from '../logger';
 
 interface ActiveAgent {
@@ -94,6 +94,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   private _activeDebugLogPath: string | null = null;
   private _lastLogFlushAt: number = 0;
   private _parallelFireTimeout: NodeJS.Timeout | null = null;
+  private _currentWorkspaceRoot: string | null = null;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     // Track recent file access
@@ -208,6 +209,19 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     const cappedLength = Math.min(2000, combined.length);
     const estimatedTokens = Math.max(1, Math.ceil(cappedLength / 4));
     this._recordTokenEstimate(estimatedTokens);
+  }
+
+  private _resolveWorkspaceRoot(query: string): string {
+    const root = pickWorkspaceRoot(query) || '';
+    return root;
+  }
+
+  private _getHistoryWorkspaceRoot(): string | undefined {
+    return (
+      this._currentWorkspaceRoot ||
+      this._codemap?.workspacePath ||
+      getActiveWorkspaceRoot()
+    );
   }
 
   private _getModelId(): string {
@@ -608,7 +622,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       };
 
       if (this._currentCodemapFilename) {
-        updateCodemap(this._currentCodemapFilename, this._codemap);
+        updateCodemap(
+          this._currentCodemapFilename,
+          this._codemap,
+          this._codemap.workspacePath || this._currentWorkspaceRoot || getActiveWorkspaceRoot()
+        );
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -731,7 +749,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       };
 
       if (this._currentCodemapFilename) {
-        updateCodemap(this._currentCodemapFilename, this._codemap);
+        updateCodemap(
+          this._currentCodemapFilename,
+          this._codemap,
+          this._codemap.workspacePath || this._currentWorkspaceRoot || getActiveWorkspaceRoot()
+        );
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -874,7 +896,11 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       };
 
       if (this._currentCodemapFilename) {
-        updateCodemap(this._currentCodemapFilename, this._codemap);
+        updateCodemap(
+          this._currentCodemapFilename,
+          this._codemap,
+          this._codemap.workspacePath || this._currentWorkspaceRoot || getActiveWorkspaceRoot()
+        );
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -937,8 +963,10 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const workspaceRoot = this._resolveWorkspaceRoot(query);
+    this._currentWorkspaceRoot = workspaceRoot || null;
     logger.startCapture(`Codemap generation: "${query}" (mode=${mode}, detail=${detailLevel})`);
-    this._activeDebugLogPath = saveDebugLog('', query);
+    this._activeDebugLogPath = saveDebugLog('', query, workspaceRoot);
     this._flushActiveLog(true);
     logger.info('Starting codemap generation...');
     this._isProcessing = true;
@@ -975,7 +1003,6 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     this._updateWebview();
 
     const generationId = ++this._currentGenerationId;
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     logger.info(`Workspace root: ${workspaceRoot}`);
 
     // Track trace stages for progress calculation
@@ -1178,17 +1205,18 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       logger.info('Codemap generation function returned');
 
       // Save codemap to storage if generation succeeded
-      const codemap = this._codemap;
+      const codemap = this._codemap as Codemap | null;
       if (codemap) {
         const metadata = this._buildCodemapMetadata(workspaceRoot);
         const updatedCodemap: Codemap = {
           ...(codemap as Codemap),
+          workspacePath: workspaceRoot || codemap.workspacePath,
           metadata,
           updatedAt: new Date().toISOString(),
         };
         this._codemap = updatedCodemap;
         logger.info('Saving codemap to storage...');
-        const savedPath = saveCodemap(updatedCodemap);
+        const savedPath = saveCodemap(updatedCodemap, workspaceRoot);
         logger.info(`Codemap saved to: ${savedPath}`);
         codemapSaved = true;
         
@@ -1273,11 +1301,17 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       const captured = logger.endCapture();
       if (captured) {
         try {
-          const logPath = this._activeDebugLogPath || saveDebugLog(captured, query);
+          const logPath = this._activeDebugLogPath || saveDebugLog(captured, query, workspaceRoot);
           if (this._activeDebugLogPath) {
             logger.writeCaptureToFile(this._activeDebugLogPath, captured);
           }
-          const baseCodemap = this._codemap;
+          const baseCodemap: Codemap | null = this._codemap;
+          const fallbackWorkspacePath =
+            workspaceRoot ||
+            baseCodemap?.workspacePath ||
+            this._currentWorkspaceRoot ||
+            getActiveWorkspaceRoot() ||
+            '';
           if (baseCodemap) {
             this._codemap = {
               ...baseCodemap,
@@ -1285,7 +1319,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
               updatedAt: new Date().toISOString(),
             };
             if (this._currentCodemapFilename) {
-              updateCodemap(this._currentCodemapFilename, this._codemap);
+              updateCodemap(this._currentCodemapFilename, this._codemap, workspaceRoot);
             }
           }
           if (!suppressFailureSave && this._lastGenerationError && !codemapSaved) {
@@ -1306,6 +1340,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
                   query,
                   mode,
                   detailLevel,
+                  workspacePath: fallbackWorkspacePath,
                   updatedAt: new Date().toISOString(),
                 }
               : {
@@ -1317,9 +1352,10 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
                   query,
                   mode,
                   detailLevel,
+                  workspacePath: fallbackWorkspacePath,
                   updatedAt: new Date().toISOString(),
                 };
-            const savedPath = saveCodemap(failedCodemap);
+            const savedPath = saveCodemap(failedCodemap, workspaceRoot);
             const filename = savedPath.split(/[/\\]/).pop() || savedPath;
             this._currentCodemapFilename = filename;
             this._codemap = failedCodemap;
@@ -1356,7 +1392,10 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
     }
 
     // Open the actual JSON file from storage
-    const filePath = getCodemapFilePath(this._currentCodemapFilename);
+    const filePath = getCodemapFilePath(
+      this._currentCodemapFilename,
+      this._codemap.workspacePath || this._currentWorkspaceRoot || getActiveWorkspaceRoot()
+    );
     const uri = vscode.Uri.file(filePath);
     
     try {
@@ -1409,7 +1448,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _deleteHistory(filename: string) {
-    if (deleteCodemap(filename)) {
+    if (deleteCodemap(filename, this._getHistoryWorkspaceRoot())) {
       this._unreadCodemaps.delete(filename);
       vscode.window.showInformationMessage('Codemap deleted');
       this._updateWebview();
@@ -1417,7 +1456,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _loadHistory(filename: string) {
-    const codemap = loadCodemap(filename);
+    const codemap = loadCodemap(filename, this._getHistoryWorkspaceRoot());
     if (codemap) {
       this._codemap = codemap;
       this._currentCodemapFilename = filename;
@@ -1438,7 +1477,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _getHistory() {
-    const codemaps = listCodemaps();
+    const codemaps = listCodemaps(this._getHistoryWorkspaceRoot());
     return codemaps.map(({ filename, codemap }) => ({
       id: filename,
       codemap,
