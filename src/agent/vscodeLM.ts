@@ -24,16 +24,18 @@ function toolResultOutputToText(output: unknown): string {
   }
 }
 
-function coerceToolCallInput(input: unknown): unknown {
+function coerceToolCallInput(input: unknown): object {
   if (input && typeof input === "object") return input;
   if (typeof input === "string") {
     try {
-      return JSON.parse(input);
+      const parsed = JSON.parse(input);
+      if (typeof parsed === "object" && parsed !== null) return parsed;
+      return { value: input };
     } catch {
-      return input;
+      return { value: input };
     }
   }
-  return input ?? {};
+  return {};
 }
 
 export function createVSCodeLM(
@@ -99,8 +101,7 @@ export function createVSCodeLM(
               return new vscode.LanguageModelToolCallPart(
                 c.toolCallId,
                 c.toolName,
-                coerceToolCallInput(c.input),
-              );
+                coerceToolCallInput(c.input) as any, );
             }
             return null;
           }).filter((
@@ -116,7 +117,9 @@ export function createVSCodeLM(
           );
 
           if (m.role === "user") {
-            return vscode.LanguageModelChatMessage.User(parts);
+            return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
           }
           if (m.role === "assistant") {
             return vscode.LanguageModelChatMessage.Assistant(
@@ -127,13 +130,16 @@ export function createVSCodeLM(
                 | vscode.LanguageModelToolCallPart =>
                 p instanceof vscode.LanguageModelTextPart ||
                 p instanceof vscode.LanguageModelToolCallPart
-              ),
-            );
+              ) as any, );
           }
           if (m.role === "tool") {
-            return vscode.LanguageModelChatMessage.User(parts);
+            return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
           }
-          return vscode.LanguageModelChatMessage.User(parts);
+          return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
         }
 
         const content = m.content as string;
@@ -239,8 +245,7 @@ export function createVSCodeLM(
               return new vscode.LanguageModelToolCallPart(
                 c.toolCallId,
                 c.toolName,
-                coerceToolCallInput(c.input),
-              );
+                coerceToolCallInput(c.input) as any, );
             }
             return null;
           }).filter((
@@ -256,7 +261,9 @@ export function createVSCodeLM(
           );
 
           if (m.role === "user") {
-            return vscode.LanguageModelChatMessage.User(parts);
+            return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
           }
           if (m.role === "assistant") {
             return vscode.LanguageModelChatMessage.Assistant(
@@ -267,13 +274,16 @@ export function createVSCodeLM(
                 | vscode.LanguageModelToolCallPart =>
                 p instanceof vscode.LanguageModelTextPart ||
                 p instanceof vscode.LanguageModelToolCallPart
-              ),
-            );
+              ) as any, );
           }
           if (m.role === "tool") {
-            return vscode.LanguageModelChatMessage.User(parts);
+            return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
           }
-          return vscode.LanguageModelChatMessage.User(parts);
+          return vscode.LanguageModelChatMessage.User(
+              parts.filter(p => !(p instanceof vscode.LanguageModelToolCallPart)) as any
+            );
         }
 
         const content = m.content as string;
@@ -359,3 +369,6 @@ export function createVSCodeLM(
 
   return model as LanguageModel;
 }
+
+
+
