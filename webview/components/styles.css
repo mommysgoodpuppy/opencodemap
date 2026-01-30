@@ -1395,6 +1395,8 @@ body {
   padding-bottom: 0;
 }
 
+/* no special connector offset for location rows */
+
 /* Connector area (columns + elbow) */
 .diagram-connectors {
   display: flex;
@@ -1449,6 +1451,7 @@ body {
 }
 
 /* Elbow horizontal segment (to the node text) */
+
 .diagram-elbow::after {
   content: "";
   position: absolute;
@@ -1526,19 +1529,20 @@ body {
 }
 
 .diagram-location-card {
-  flex: 1;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
-  background: var(--vscode-editor-background, #1e1e1e);
-  border: 1px solid var(--vscode-panel-border, #2b2b2b);
+  background: #1b1b1f;
+  max-width: calc(100% - 32px);
+  min-width: 0;
 }
 
 .diagram-location-title-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
@@ -1553,7 +1557,7 @@ body {
 .diagram-location-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--vscode-foreground, #f0f0f0);
+  color: var(--vscode-foreground, #f7f7f7);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1566,21 +1570,28 @@ body {
   flex-shrink: 0;
 }
 
-.diagram-location-desc {
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground, #b3b3b3);
-  line-height: 1.4;
-}
-
 .diagram-location-code {
-  margin: 0;
+  margin: 4px 0 0;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 12px;
-  background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e);
-  color: var(--vscode-editor-foreground, #dcdcdc);
-  padding: 8px;
-  border-radius: 6px;
-  overflow-x: auto;
+  background: none;
+  color: var(--vscode-editor-foreground, #f0f0f0);
+  padding: 0;
+  border-radius: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diagram-file-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9da5b4);
+  cursor: pointer;
+}
+
+.diagram-file-label:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
 }
 
 .diagram-dot {
