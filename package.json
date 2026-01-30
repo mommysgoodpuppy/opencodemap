@@ -3,7 +3,7 @@
   "publisher": "mommysgoodpuppy",
   "displayName": "OpenCodemap",
   "description": "AI-powered code exploration and visualization with dual-view rendering",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "engines": {
     "vscode": "^1.98.0"
   },
