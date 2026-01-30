@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { Wrench } from 'lucide-react';
-import type { CodemapTrace, CodemapLocation } from '../types';
+import React, { useMemo } from "react";
+import { Wrench } from "lucide-react";
+import type { CodemapLocation, CodemapTrace } from "../types";
 
 /**
  * Parsed node from traceTextDiagram
@@ -9,7 +9,7 @@ interface DiagramNode {
   id: string;
   title: string;
   link?: {
-    type: 'location' | 'file';
+    type: "location" | "file";
     locationId?: string;
     filePath?: string;
     lineNumber?: number;
@@ -24,7 +24,7 @@ interface DiagramNode {
 interface TreeRow {
   id: string;
   title: string;
-  link?: DiagramNode['link'];
+  link?: DiagramNode["link"];
   depth: number;
   isLast: boolean;
   /** For each ancestor level, true = show vertical line (not last child at that level) */
@@ -36,31 +36,37 @@ interface TreeRow {
  */
 function cleanTitle(text: string): string {
   // Remove leading tree drawing chars that leaked into content
-  return text.replace(/^[└├│─\s]+/, '').trim();
+  return text.replace(/^[└├│─\s]+/, "").trim();
 }
 
 /**
  * Parse a single line from traceTextDiagram
  */
-function parseDiagramLine(line: string): { level: number; title: string; link?: DiagramNode['link'] } {
+function parseDiagramLine(
+  line: string,
+): { level: number; title: string; link?: DiagramNode["link"] } {
   let level = 0;
   let i = 0;
-  
+
   while (i < line.length) {
     const char = line[i];
-    if (char === '│' || char === ' ' || char === '\t') {
-      if (char === '│') {
+    if (char === "│" || char === " " || char === "\t") {
+      if (char === "│") {
         level++;
         i += 4;
-      } else if (line.substring(i, i + 4) === '    ') {
+      } else if (line.substring(i, i + 4) === "    ") {
         level++;
         i += 4;
       } else {
         i++;
       }
-    } else if (char === '├' || char === '└') {
+    } else if (char === "├" || char === "└") {
       // Skip tree branch chars (├── or └── or └─ etc)
-      while (i < line.length && (line[i] === '├' || line[i] === '└' || line[i] === '─' || line[i] === ' ')) {
+      while (
+        i < line.length &&
+        (line[i] === "├" || line[i] === "└" || line[i] === "─" ||
+          line[i] === " ")
+      ) {
         i++;
       }
       break;
@@ -68,59 +74,59 @@ function parseDiagramLine(line: string): { level: number; title: string; link?: 
       break;
     }
   }
-  
+
   let content = line.substring(i).trim();
   // Clean any remaining tree chars from start of content
   content = cleanTitle(content);
-  
+
   const linkMatch = content.match(/^(.+?)\s*<--\s*(.+)$/);
-  
+
   if (linkMatch) {
     const title = cleanTitle(linkMatch[1]);
     const linkStr = linkMatch[2].trim();
-    
+
     // Location reference: "1a", "2b", etc
     const locationMatch = linkStr.match(/^(\d+[a-z])$/i);
     if (locationMatch) {
       return {
         level,
         title,
-        link: { type: 'location', locationId: locationMatch[1].toLowerCase() },
+        link: { type: "location", locationId: locationMatch[1].toLowerCase() },
       };
     }
-    
+
     // File path with line number - use GREEDY match to handle Windows paths like e:\...:6
     // Match everything up to the LAST colon followed by digits
     const fileMatch = linkStr.match(/^(.+):(\d+)$/);
     if (fileMatch) {
-      let filePath = fileMatch[1].replace(/\\\\/g, '\\');
+      let filePath = fileMatch[1].replace(/\\\\/g, "\\");
       // Normalize forward slashes to backslashes on Windows paths
       if (/^[a-zA-Z][:\\/]/.test(filePath)) {
-        filePath = filePath.replace(/\//g, '\\');
+        filePath = filePath.replace(/\//g, "\\");
       }
       return {
         level,
         title,
         link: {
-          type: 'file',
+          type: "file",
           filePath,
           lineNumber: parseInt(fileMatch[2], 10),
         },
       };
     }
-    
+
     // Just a file path without line number
-    let filePath = linkStr.replace(/\\\\/g, '\\');
+    let filePath = linkStr.replace(/\\\\/g, "\\");
     if (/^[a-zA-Z][:\\/]/.test(filePath)) {
-      filePath = filePath.replace(/\//g, '\\');
+      filePath = filePath.replace(/\//g, "\\");
     }
     return {
       level,
       title,
-      link: { type: 'file', filePath },
+      link: { type: "file", filePath },
     };
   }
-  
+
   return { level, title: content };
 }
 
@@ -128,15 +134,15 @@ function parseDiagramLine(line: string): { level: number; title: string; link?: 
  * Parse traceTextDiagram string into tree structure
  */
 function parseTraceTextDiagram(diagram: string): DiagramNode[] {
-  const lines = diagram.split('\n').filter(line => line.trim());
+  const lines = diagram.split("\n").filter((line) => line.trim());
   if (lines.length === 0) return [];
-  
+
   const rootNodes: DiagramNode[] = [];
   const stack: { node: DiagramNode; level: number }[] = [];
   let nodeId = 0;
-  
+
   for (const line of lines) {
-    if (!line.includes('├') && !line.includes('└') && !line.includes('│')) {
+    if (!line.includes("├") && !line.includes("└") && !line.includes("│")) {
       const parsed = parseDiagramLine(line);
       const node: DiagramNode = {
         id: `dn-${nodeId++}`,
@@ -150,7 +156,7 @@ function parseTraceTextDiagram(diagram: string): DiagramNode[] {
       stack.push({ node, level: -1 });
       continue;
     }
-    
+
     const parsed = parseDiagramLine(line);
     const node: DiagramNode = {
       id: `dn-${nodeId++}`,
@@ -159,32 +165,36 @@ function parseTraceTextDiagram(diagram: string): DiagramNode[] {
       children: [],
       level: parsed.level,
     };
-    
+
     while (stack.length > 0 && stack[stack.length - 1].level >= parsed.level) {
       stack.pop();
     }
-    
+
     if (stack.length > 0) {
       stack[stack.length - 1].node.children.push(node);
     } else {
       rootNodes.push(node);
     }
-    
+
     stack.push({ node, level: parsed.level });
   }
-  
+
   return rootNodes;
 }
 
 /**
  * Flatten tree into rows with connector info
  */
-function flattenTree(nodes: DiagramNode[], depth: number = 0, connectors: boolean[] = []): TreeRow[] {
+function flattenTree(
+  nodes: DiagramNode[],
+  depth: number = 0,
+  connectors: boolean[] = [],
+): TreeRow[] {
   const rows: TreeRow[] = [];
-  
+
   nodes.forEach((node, idx) => {
     const isLast = idx === nodes.length - 1;
-    
+
     rows.push({
       id: node.id,
       title: node.title,
@@ -193,13 +203,16 @@ function flattenTree(nodes: DiagramNode[], depth: number = 0, connectors: boolea
       isLast,
       connectors: [...connectors],
     });
-    
+
     if (node.children.length > 0) {
-      const childRows = flattenTree(node.children, depth + 1, [...connectors, !isLast]);
+      const childRows = flattenTree(node.children, depth + 1, [
+        ...connectors,
+        !isLast,
+      ]);
       rows.push(...childRows);
     }
   });
-  
+
   return rows;
 }
 
@@ -228,12 +241,12 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
     if (!trace.traceTextDiagram) {
       return { rootTitle: null, rows: [] };
     }
-    
+
     const nodes = parseTraceTextDiagram(trace.traceTextDiagram);
     if (nodes.length === 0) {
       return { rootTitle: null, rows: [] };
     }
-    
+
     const firstNode = nodes[0];
     if (firstNode.level === -1 && firstNode.children.length > 0) {
       return {
@@ -241,13 +254,13 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
         rows: flattenTree(firstNode.children, 0, []),
       };
     }
-    
+
     return {
       rootTitle: null,
       rows: flattenTree(nodes, 0, []),
     };
   }, [trace.traceTextDiagram]);
-  
+
   if (!trace.traceTextDiagram || rows.length === 0) {
     return (
       <div className="diagram-empty">
@@ -255,33 +268,101 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
       </div>
     );
   }
-  
+
   const handleRowClick = (row: TreeRow) => {
-    if (row.link?.type === 'location' && row.link.locationId) {
+    if (row.link?.type === "location" && row.link.locationId) {
       const loc = allLocations.get(row.link.locationId);
       if (loc) onLocationClick(loc);
-    } else if (row.link?.type === 'file' && row.link.filePath) {
+    } else if (row.link?.type === "file" && row.link.filePath) {
       onFileClick(row.link.filePath, row.link.lineNumber);
     }
   };
-  
+
   return (
     <div className="diagram-tree">
-      {rootTitle && (
-        <div className="diagram-root-title">{rootTitle}</div>
-      )}
+      {rootTitle && <div className="diagram-root-title">{rootTitle}</div>}
       <div className="diagram-body">
         {rows.map((row) => {
+          const location = row.link?.type === "location" && row.link.locationId
+            ? allLocations.get(row.link.locationId)
+            : undefined;
           const isClickable = row.link != null;
-          const isFixedLocation =
-            row.link?.type === 'location' &&
+          const isFixedLocation = row.link?.type === "location" &&
             row.link.locationId &&
             fixedLocationIds?.has(row.link.locationId);
-          
+
+          const fileRef = (() => {
+            if (row.link?.type === "file" && row.link.filePath) {
+              return { path: row.link.filePath, line: row.link.lineNumber };
+            }
+            if (location) {
+              return { path: location.path, line: location.lineNumber };
+            }
+            return null;
+          })();
+
+          const codeSnippet = location?.lineContent?.trim();
+          const nodeKind: "context" | "event" | "code" | "file" = location
+            ? "code"
+            : row.link?.type === "file"
+            ? "file"
+            : row.depth === 0
+            ? "context"
+            : "event";
+          const isLocationNode = nodeKind === "code";
+
+          const fileLabel = fileRef
+            ? `${fileRef.path.split(/[/\\]/).pop() || fileRef.path}${
+              fileRef.line ? `:${fileRef.line}` : ""
+            }`
+            : undefined;
+
+          const locationFileLabel = isLocationNode && fileLabel && fileRef
+            ? (
+              <span
+                className="diagram-file-label"
+                title={fileRef.path}
+                role="link"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFileClick(fileRef.path, fileRef.line);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onFileClick(fileRef.path, fileRef.line);
+                  }
+                }}
+              >
+                {fileLabel}
+              </span>
+            )
+            : null;
+
+          const isLinkBasicNode = !isLocationNode && isClickable;
+          const showDot = nodeKind === "file" && !location && !isLinkBasicNode;
+          const titleClassName = [
+            "diagram-title",
+            isLinkBasicNode ? "diagram-title-link" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          const rowClassName = [
+            "diagram-row",
+            isClickable ? "clickable" : "",
+            isLocationNode ? "diagram-row-location" : "diagram-row-basic",
+            `diagram-row-${nodeKind}`,
+          ]
+            .filter(Boolean)
+            .join(" ");
+
           return (
-            <div 
+            <div
               key={row.id}
-              className={`diagram-row ${isClickable ? 'clickable' : ''}`}
+              className={rowClassName}
               onClick={isClickable ? () => handleRowClick(row) : undefined}
             >
               {/* Drawn tree connectors (continuous vertical lines + elbows) */}
@@ -289,26 +370,58 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
                 {row.connectors.map((showLine, idx) => (
                   <span
                     key={idx}
-                    className={`diagram-col ${showLine ? 'has-line' : ''}`}
+                    className={`diagram-col ${showLine ? "has-line" : ""}`}
                   />
                 ))}
-                <span className={`diagram-elbow ${row.isLast ? 'last' : 'mid'}`} />
+                <span
+                  className={`diagram-elbow ${row.isLast ? "last" : "mid"}`}
+                />
               </div>
-              
-              {/* Location badge */}
-              {row.link?.type === 'location' && row.link.locationId && (
-                <>
-                  <span className="diagram-badge">{row.link.locationId}</span>
-                  {isFixedLocation && (
-                    <span className="diagram-fix" title="Auto-corrected location">
-                      <Wrench size={12} />
-                    </span>
-                  )}
-                </>
-              )}
-              
-              {/* Title */}
-              <span className="diagram-title">{row.title}</span>
+
+              {isLocationNode
+                ? (
+                  <div className="diagram-location-card">
+                    <div className="diagram-location-title-row">
+                      <div className="diagram-location-title-main">
+                        {row.link?.locationId && (
+                          <span className="diagram-badge">
+                            {row.link.locationId}
+                          </span>
+                        )}
+                        <span className="diagram-location-title">
+                          {row.title}
+                        </span>
+                      </div>
+                      {(isFixedLocation || locationFileLabel) && (
+                        <div className="diagram-location-meta">
+                          {isFixedLocation && (
+                            <span
+                              className="diagram-fix"
+                              title="Auto-corrected location"
+                            >
+                              <Wrench size={12} />
+                            </span>
+                          )}
+                          {locationFileLabel}
+                        </div>
+                      )}
+                    </div>
+                    {codeSnippet && (
+                      <pre
+                        className="diagram-location-code"
+                        title={codeSnippet}
+                      >
+                      {codeSnippet}
+                      </pre>
+                    )}
+                  </div>
+                )
+                : (
+                  <div className="diagram-basic">
+                    {showDot && <span className="diagram-dot" />}
+                    <span className={titleClassName}>{row.title}</span>
+                  </div>
+                )}
             </div>
           );
         })}
@@ -317,4 +430,4 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
   );
 };
 
-export { parseTraceTextDiagram, type DiagramNode };
+export { type DiagramNode, parseTraceTextDiagram };

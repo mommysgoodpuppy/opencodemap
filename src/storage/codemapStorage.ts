@@ -14,6 +14,8 @@ const CODEMAP_SUBDIR = 'codemap';
 // Cache for storage directories to avoid repeated filesystem checks
 const cachedStorageDirs = new Map<string, string>();
 
+const WORKSPACE_CODEMAP_DIRNAME = '.codemaps';
+
 /**
  * Get the storage directory for the current workspace
  * Returns: ~/.cometix/codemap/<workspace-name>/
@@ -75,6 +77,113 @@ function generateDebugLogFilename(label: string): string {
   return `${timestamp}_${slug}.debug.log`;
 }
 
+function getWorkspaceCodemapDir(workspacePath?: string): string | null {
+  const root = workspacePath || getActiveWorkspaceRoot();
+  if (!root) return null;
+  const dir = path.join(root, WORKSPACE_CODEMAP_DIRNAME);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return null;
+  }
+  return dir;
+}
+
+function normalizeExternalCodemap(
+  data: any,
+  filePath: string,
+  workspacePath?: string,
+): (Codemap & { savedAt: string }) | null {
+  if (!data || typeof data !== 'object') return null;
+
+  const savedAt = data.savedAt
+    || data.metadata?.generationTimestamp
+    || data.metadata?.generatedAt
+    || data.metadata?.timestamp
+    || data.generatedAt
+    || (() => {
+      try {
+        return fs.statSync(filePath).mtime.toISOString();
+      } catch {
+        return undefined;
+      }
+    })();
+
+  const mode = (data.mode || data.metadata?.mode || '').toString().toLowerCase();
+
+  const codemap: Codemap & { savedAt: string } = {
+    title: data.title || data.metadata?.title || path.basename(filePath),
+    description: data.description || data.metadata?.description || '',
+    traces: Array.isArray(data.traces) ? data.traces : [],
+    mermaidDiagram: data.mermaidDiagram || data.diagram,
+    debugLogPath: data.debugLogPath,
+    metadata: data.metadata,
+    savedAt: savedAt || new Date().toISOString(),
+    workspacePath: workspacePath || data.workspacePath,
+    query: data.query || data.metadata?.originalPrompt,
+    mode: mode === 'smart' || mode === 'fast' ? mode : undefined,
+    detailLevel: data.detailLevel,
+    schemaVersion: data.schemaVersion,
+    updatedAt: data.updatedAt,
+    stage12Context: data.stage12Context,
+  };
+
+  return codemap;
+}
+
+function loadWorkspaceCodemap(filename: string, workspacePath?: string): (Codemap & { savedAt: string }) | null {
+  const isAbsolute = path.isAbsolute(filename);
+  const root = workspacePath || getActiveWorkspaceRoot();
+  if (!root) return null;
+  const baseDir = getWorkspaceCodemapDir(root);
+  if (!baseDir && !isAbsolute) return null;
+
+  const filePath = isAbsolute ? filename : path.join(baseDir ?? '', filename);
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(content);
+    return normalizeExternalCodemap(data, filePath, root);
+  } catch {
+    return null;
+  }
+}
+
+function listWorkspaceCodemaps(
+  workspacePath?: string,
+): Array<{ filename: string; codemap: Codemap & { savedAt: string } }> {
+  const dir = getWorkspaceCodemapDir(workspacePath);
+  if (!dir) return [];
+
+  try {
+    const files = fs.readdirSync(dir)
+      .filter(f => f.endsWith('.codemap'))
+      .sort();
+
+    const root = workspacePath || getActiveWorkspaceRoot();
+
+    return files
+      .map(filename => {
+        const filePath = path.join(dir, filename);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(content);
+        const codemap = normalizeExternalCodemap(data, filePath, root || undefined);
+        if (!codemap) return null;
+        return { filename, codemap } as const;
+      })
+      .filter((entry): entry is { filename: string; codemap: Codemap & { savedAt: string } } => Boolean(entry))
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+function savedAtMs(codemap: Codemap & { savedAt?: string }): number {
+  if (codemap.savedAt) {
+    const ms = Date.parse(codemap.savedAt);
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return 0;
+}
+
 /**
  * Save a codemap to storage
  */
@@ -125,22 +234,28 @@ export function listCodemaps(
   workspacePath?: string
 ): Array<{ filename: string; codemap: Codemap & { savedAt: string } }> {
   const storageDir = getCodemapStorageDir(workspacePath);
-  
-  try {
-    const files = fs.readdirSync(storageDir)
-      .filter(f => f.endsWith('.json') && !f.endsWith('.context.json'))
-      .sort()
-      .reverse(); // Most recent first
-    
-    return files.map(filename => {
-      const filePath = path.join(storageDir, filename);
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const codemap = JSON.parse(content) as Codemap & { savedAt: string };
-      return { filename, codemap };
-    });
-  } catch {
-    return [];
-  }
+
+  const stored: Array<{ filename: string; codemap: Codemap & { savedAt: string } }> = (() => {
+    try {
+      const files = fs.readdirSync(storageDir)
+        .filter(f => f.endsWith('.json') && !f.endsWith('.context.json'))
+        .sort();
+
+      return files.map(filename => {
+        const filePath = path.join(storageDir, filename);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const codemap = JSON.parse(content) as Codemap & { savedAt: string };
+        return { filename, codemap };
+      });
+    } catch {
+      return [];
+    }
+  })();
+
+  const workspace = listWorkspaceCodemaps(workspacePath);
+
+  return [...stored, ...workspace]
+    .sort((a, b) => savedAtMs(b.codemap) - savedAtMs(a.codemap));
 }
 
 /**
@@ -152,13 +267,27 @@ export function loadCodemap(
 ): (Codemap & { savedAt: string }) | null {
   const storageDir = getCodemapStorageDir(workspacePath);
   const filePath = path.join(storageDir, filename);
-  
+
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return JSON.parse(content) as Codemap & { savedAt: string };
   } catch {
-    return null;
+    // Ignore and try workspace .codemaps fallback
   }
+
+  // If the filename looks like a .codemap file or exists in workspace .codemaps, try loading it
+  if (filename.endsWith('.codemap')) {
+    const codemap = loadWorkspaceCodemap(filename, workspacePath);
+    if (codemap) return codemap;
+  }
+
+  // Try absolute path fallback (supports manual selection)
+  if (path.isAbsolute(filename)) {
+    const codemap = loadWorkspaceCodemap(filename, workspacePath);
+    if (codemap) return codemap;
+  }
+
+  return null;
 }
 
 /**

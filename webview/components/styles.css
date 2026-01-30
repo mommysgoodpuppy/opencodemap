@@ -1353,10 +1353,17 @@ body {
 
 .diagram-tree {
   --diagram-col-width: 18px;
-  --diagram-row-height: 22px;
+  --diagram-row-height: 30px;
   --diagram-line-color: var(--vscode-focusBorder, #9cdcfe);
   --diagram-line-width: 2px;
   padding: 4px 0;
+}
+
+.diagram-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
 }
 
 .diagram-root-title {
@@ -1368,26 +1375,31 @@ body {
 
 .diagram-row {
   display: flex;
-  align-items: center;
-  height: var(--diagram-row-height);
-  padding: 0 8px;
-  border-radius: 3px;
+  align-items: stretch;
+  min-height: var(--diagram-row-height);
+  padding: 0 4px;
   user-select: none;
+  gap: 4px;
 }
 
 .diagram-row.clickable {
   cursor: pointer;
 }
 
-.diagram-row.clickable:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
+.diagram-row-basic.clickable:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.04));
+}
+
+.diagram-row-location {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Connector area (columns + elbow) */
 .diagram-connectors {
   display: flex;
   align-items: stretch;
-  height: 100%;
+  height: auto;
   flex-shrink: 0;
 }
 
@@ -1478,6 +1490,105 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
+}
+
+.diagram-title-link {
+  color: var(--vscode-foreground, #ffffff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.diagram-basic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.diagram-row-file .diagram-basic {
+  color: var(--vscode-descriptionForeground, #8b949e);
+}
+
+.diagram-inline-link {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.diagram-inline-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.diagram-location-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, #2b2b2b);
+}
+
+.diagram-location-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagram-location-title-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.diagram-location-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground, #f0f0f0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagram-location-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.diagram-location-desc {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #b3b3b3);
+  line-height: 1.4;
+}
+
+.diagram-location-code {
+  margin: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e);
+  color: var(--vscode-editor-foreground, #dcdcdc);
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.diagram-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-icon-foreground, #c5c5c5);
+  opacity: 0.8;
 }
 
 .diagram-empty {
