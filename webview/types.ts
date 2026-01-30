@@ -170,6 +170,7 @@ export type ExtensionToWebviewMessage =
       progress?: ProgressState;
       availableModels?: ModelInfo[];
       selectedModel?: string;
+      currentCodemapId?: string;
     }
   | { type: 'setQuery'; query: string }
   | { type: 'navigate'; page: 'home' | 'detail' };

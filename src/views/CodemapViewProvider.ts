@@ -1686,6 +1686,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
         progress: this._progress,
         availableModels: this._availableModels,
         selectedModel,
+        currentCodemapId: this._currentCodemapFilename || undefined,
       });
     }
   }

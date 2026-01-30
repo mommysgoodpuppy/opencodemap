@@ -1,35 +1,44 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { GitFork, LayoutDashboard, Info, FileJson, RefreshCw, FileText, FileSpreadsheet } from 'lucide-react';
-import { QueryBar } from './QueryBar';
-import { SuggestionSection } from './SuggestionSection';
-import { CodemapList } from './CodemapList';
-import { CodemapTreeView, renderInlineMarkdown } from './CodemapTreeView';
-import { CodemapDiagramView } from './CodemapDiagramView';
-import { useExtensionCommands, useVsCodeApi } from '../extensionBridge';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FileJson,
+  FileSpreadsheet,
+  FileText,
+  GitFork,
+  Info,
+  LayoutDashboard,
+  RefreshCw,
+} from "lucide-react";
+import { QueryBar } from "./QueryBar";
+import { SuggestionSection } from "./SuggestionSection";
+import { CodemapList } from "./CodemapList";
+import { CodemapTreeView, renderInlineMarkdown } from "./CodemapTreeView";
+import { CodemapDiagramView } from "./CodemapDiagramView";
+import { useExtensionCommands, useVsCodeApi } from "../extensionBridge";
 import type {
   Codemap,
-  CodemapSuggestion,
   CodemapHistoryItem,
   CodemapLocation,
-  ExtensionToWebviewMessage,
-  ProgressState,
-  ModelInfo,
+  CodemapSuggestion,
   DetailLevel,
-} from '../types';
+  ExtensionToWebviewMessage,
+  ModelInfo,
+  ProgressState,
+} from "../types";
 
 interface AppState {
   query: string;
-  mode: 'fast' | 'smart';
+  mode: "fast" | "smart";
   detailLevel: DetailLevel;
   isProcessing: boolean;
   codemap: Codemap | null;
   suggestions: CodemapSuggestion[];
   history: CodemapHistoryItem[];
-  activeView: 'tree' | 'diagram';
-  page: 'home' | 'detail';
+  activeView: "tree" | "diagram";
+  page: "home" | "detail";
   progress?: ProgressState;
   availableModels: ModelInfo[];
   selectedModel: string;
+  currentCodemapId?: string;
 }
 
 /**
@@ -43,17 +52,18 @@ export const App: React.FC = () => {
     // Try to restore state from VS Code
     const saved = api.getState() as Partial<AppState> | null;
     return {
-      query: saved?.query || '',
-      mode: saved?.mode || 'smart',
-      detailLevel: saved?.detailLevel || 'overview',
+      query: saved?.query || "",
+      mode: saved?.mode || "smart",
+      detailLevel: saved?.detailLevel || "overview",
       isProcessing: false,
       codemap: null,
       suggestions: [],
       history: [],
-      activeView: saved?.activeView || 'tree',
-      page: saved?.page || 'home',
+      activeView: saved?.activeView || "tree",
+      page: saved?.page || "home",
       availableModels: [],
-      selectedModel: '',
+      selectedModel: "",
+      currentCodemapId: saved?.currentCodemapId,
     };
   });
 
@@ -65,8 +75,16 @@ export const App: React.FC = () => {
       detailLevel: state.detailLevel,
       activeView: state.activeView,
       page: state.page,
+      currentCodemapId: state.currentCodemapId,
     });
-  }, [api, state.query, state.mode, state.activeView, state.page]);
+  }, [
+    api,
+    state.query,
+    state.mode,
+    state.activeView,
+    state.page,
+    state.currentCodemapId,
+  ]);
 
   // Handle messages from extension
   useEffect(() => {
@@ -74,14 +92,13 @@ export const App: React.FC = () => {
       const message = event.data;
 
       switch (message.type) {
-        case 'update':
+        case "update":
           setState((prev) => {
             // Don't auto-navigate to detail page when codemap is generated
             // User needs to manually click to view it
-            const shouldReturnHome =
-              !message.codemap &&
+            const shouldReturnHome = !message.codemap &&
               !message.isProcessing &&
-              prev.page === 'detail';
+              prev.page === "detail";
 
             return {
               ...prev,
@@ -92,21 +109,23 @@ export const App: React.FC = () => {
               history: message.history,
               progress: message.progress,
               availableModels: message.availableModels || [],
-              selectedModel: message.selectedModel || '',
+              selectedModel: message.selectedModel || "",
+              currentCodemapId: message.currentCodemapId ||
+                prev.currentCodemapId,
               // Stay on current page, only go home if detail page has no codemap
-              page: shouldReturnHome ? 'home' : prev.page,
+              page: shouldReturnHome ? "home" : prev.page,
             };
           });
           break;
 
-        case 'setQuery':
+        case "setQuery":
           setState((prev) => ({
             ...prev,
             query: message.query,
           }));
           break;
 
-        case 'navigate':
+        case "navigate":
           setState((prev) => ({
             ...prev,
             page: message.page,
@@ -115,12 +134,12 @@ export const App: React.FC = () => {
       }
     };
 
-    window.addEventListener('message', handleMessage);
+    window.addEventListener("message", handleMessage);
 
     // Signal that webview is ready
     commands.ready();
 
-    return () => window.removeEventListener('message', handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, [commands]);
 
   // Handlers
@@ -128,7 +147,7 @@ export const App: React.FC = () => {
     setState((prev) => ({ ...prev, query }));
   }, []);
 
-  const handleModeChange = useCallback((mode: 'fast' | 'smart') => {
+  const handleModeChange = useCallback((mode: "fast" | "smart") => {
     setState((prev) => ({ ...prev, mode }));
   }, []);
 
@@ -140,7 +159,13 @@ export const App: React.FC = () => {
     if (state.query.trim() && !state.isProcessing) {
       commands.submit(state.query.trim(), state.mode, state.detailLevel);
     }
-  }, [commands, state.query, state.mode, state.detailLevel, state.isProcessing]);
+  }, [
+    commands,
+    state.query,
+    state.mode,
+    state.detailLevel,
+    state.isProcessing,
+  ]);
 
   const handleSuggestionClick = useCallback((suggestion: CodemapSuggestion) => {
     // Only fill query, don't auto-submit
@@ -167,7 +192,7 @@ export const App: React.FC = () => {
     commands.openFile(location.path, location.lineNumber);
   }, [commands]);
 
-  const handleViewChange = useCallback((view: 'tree' | 'diagram') => {
+  const handleViewChange = useCallback((view: "tree" | "diagram") => {
     setState((prev) => ({ ...prev, activeView: view }));
   }, []);
 
@@ -198,17 +223,18 @@ export const App: React.FC = () => {
     commands.regenerateMermaidDiagram();
   }, [commands, state.isProcessing]);
 
-  const handleRegenerateFromScratch = useCallback((item: CodemapHistoryItem) => {
-    const query =
-      item.codemap.query ||
-      item.codemap.stage12Context?.query ||
-      '';
-    const mode =
-      item.codemap.mode ||
-      item.codemap.stage12Context?.mode ||
-      state.mode;
-    setState((prev) => ({ ...prev, query, mode }));
-  }, [state.mode]);
+  const handleRegenerateFromScratch = useCallback(
+    (item: CodemapHistoryItem) => {
+      const query = item.codemap.query ||
+        item.codemap.stage12Context?.query ||
+        "";
+      const mode = item.codemap.mode ||
+        item.codemap.stage12Context?.mode ||
+        state.mode;
+      setState((prev) => ({ ...prev, query, mode }));
+    },
+    [state.mode],
+  );
 
   const handleSelectModel = useCallback((modelId: string) => {
     commands.selectModel(modelId);
@@ -236,7 +262,7 @@ export const App: React.FC = () => {
   }, [state.codemap]);
 
   // Home page: query + suggestions + codemap list
-  if (state.page === 'home') {
+  if (state.page === "home") {
     return (
       <div className="app-container">
         <QueryBar
@@ -264,6 +290,7 @@ export const App: React.FC = () => {
 
         <CodemapList
           currentCodemap={state.codemap}
+          currentCodemapId={state.currentCodemapId}
           history={state.history}
           isProcessing={state.isProcessing}
           progress={state.progress}
@@ -283,13 +310,15 @@ export const App: React.FC = () => {
       {/* Header with title, meta, tabs and description */}
       <div className="detail-header">
         {/* Title row */}
-        <div className="detail-title">{state.codemap?.title || 'Codemap'}</div>
+        <div className="detail-title">{state.codemap?.title || "Codemap"}</div>
 
         {/* Meta row */}
         {state.codemap?.savedAt && (
           <div className="detail-meta">
             <Info size={12} />
-            <span>Created {new Date(state.codemap.savedAt).toLocaleString()}</span>
+            <span>
+              Created {new Date(state.codemap.savedAt).toLocaleString()}
+            </span>
           </div>
         )}
 
@@ -302,9 +331,9 @@ export const App: React.FC = () => {
                   id: `file-${filePath}`,
                   path: filePath,
                   lineNumber: lineNumber || 1,
-                  lineContent: '',
+                  lineContent: "",
                   title: filePath.split(/[/\\]/).pop() || filePath,
-                  description: '',
+                  description: "",
                 });
               },
               onOpenLocationRef: (locationId) => {
@@ -318,8 +347,10 @@ export const App: React.FC = () => {
         {/* View tabs row */}
         <div className="view-tabs">
           <button
-            className={`view-tab ${state.activeView === 'tree' ? 'active' : ''}`}
-            onClick={() => handleViewChange('tree')}
+            className={`view-tab ${
+              state.activeView === "tree" ? "active" : ""
+            }`}
+            onClick={() => handleViewChange("tree")}
           >
             <GitFork size={14} />
             Tree View
@@ -333,8 +364,10 @@ export const App: React.FC = () => {
             <RefreshCw size={14} />
           </button>
           <button
-            className={`view-tab ${state.activeView === 'diagram' ? 'active' : ''}`}
-            onClick={() => handleViewChange('diagram')}
+            className={`view-tab ${
+              state.activeView === "diagram" ? "active" : ""
+            }`}
+            onClick={() => handleViewChange("diagram")}
           >
             <LayoutDashboard size={14} />
             Diagram
@@ -376,17 +409,22 @@ export const App: React.FC = () => {
       </div>
 
       <div className="scroll-container custom-scrollbar">
-        {state.activeView === 'tree' ? (
-          <CodemapTreeView
-            codemap={state.codemap}
-            onLocationClick={handleLocationClick}
-            isProcessing={state.isProcessing}
-            canRetryTraces={Boolean(state.codemap?.stage12Context)}
-            onRetryTrace={handleRetryTrace}
-          />
-        ) : (
-          <CodemapDiagramView codemap={state.codemap} onLocationClick={handleLocationClick} />
-        )}
+        {state.activeView === "tree"
+          ? (
+            <CodemapTreeView
+              codemap={state.codemap}
+              onLocationClick={handleLocationClick}
+              isProcessing={state.isProcessing}
+              canRetryTraces={Boolean(state.codemap?.stage12Context)}
+              onRetryTrace={handleRetryTrace}
+            />
+          )
+          : (
+            <CodemapDiagramView
+              codemap={state.codemap}
+              onLocationClick={handleLocationClick}
+            />
+          )}
       </div>
     </div>
   );

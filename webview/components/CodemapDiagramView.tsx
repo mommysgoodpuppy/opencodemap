@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { MermaidDiagram } from './MermaidDiagram';
-import { useExtensionCommands } from '../extensionBridge';
-import type { Codemap, CodemapLocation } from '../types';
+import React, { useEffect, useMemo, useRef } from "react";
+import { MermaidDiagram } from "./MermaidDiagram";
+import { useExtensionCommands } from "../extensionBridge";
+import type { Codemap, CodemapLocation } from "../types";
 
 interface CodemapDiagramViewProps {
   codemap: Codemap | null;
@@ -32,7 +32,9 @@ export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
   const commands = useExtensionCommands();
   const requestedKeyRef = useRef<string | null>(null);
 
-  const mermaidCode = useMemo(() => codemap?.mermaidDiagram?.trim() || '', [codemap?.mermaidDiagram]);
+  const mermaidCode = useMemo(() => codemap?.mermaidDiagram?.trim() || "", [
+    codemap?.mermaidDiagram,
+  ]);
 
   const locationMap = useMemo(() => {
     if (!codemap) return new Map<string, CodemapLocation>();
@@ -46,12 +48,26 @@ export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
     }
   };
 
+  // Ensure the mermaid diagram is generated (AI). No fallback diagram building.
+  useEffect(() => {
+    if (!codemap) return;
+    if (mermaidCode) return;
+
+    // Attempt to identify the current codemap instance to avoid spamming requests.
+    const key = `${codemap.title}::${codemap.savedAt ?? ""}`;
+    if (requestedKeyRef.current === key) return;
+    requestedKeyRef.current = key;
+
+    commands.ensureMermaidDiagram();
+  }, [codemap, mermaidCode, commands]);
+
   if (!codemap) {
     return (
       <div className="empty-state">
         <div className="empty-state-icon">📊</div>
         <div className="empty-state-text">
-          No codemap selected. Go back to the Codemaps list to open or generate one.
+          No codemap selected. Go back to the Codemaps list to open or generate
+          one.
         </div>
       </div>
     );
@@ -68,19 +84,6 @@ export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
     );
   }
 
-  // Ensure the mermaid diagram is generated (AI). No fallback diagram building.
-  useEffect(() => {
-    if (!codemap) return;
-    if (mermaidCode) return;
-
-    // Attempt to identify the current codemap instance to avoid spamming requests.
-    const key = `${codemap.title}::${codemap.savedAt ?? ''}`;
-    if (requestedKeyRef.current === key) return;
-    requestedKeyRef.current = key;
-
-    commands.ensureMermaidDiagram();
-  }, [codemap, mermaidCode, commands]);
-
   if (!mermaidCode) {
     return (
       <div className="diagram-container">
@@ -93,7 +96,11 @@ export const CodemapDiagramView: React.FC<CodemapDiagramViewProps> = ({
 
   return (
     <div className="diagram-container">
-      <MermaidDiagram code={mermaidCode} id="codemap-diagram" onNodeClick={handleNodeClick} />
+      <MermaidDiagram
+        code={mermaidCode}
+        id="codemap-diagram"
+        onNodeClick={handleNodeClick}
+      />
     </div>
   );
 };
