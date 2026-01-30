@@ -56,6 +56,7 @@ If the same utility/service is used by 2+ traces (logger, config, db pool):
 - Linear pipelines stay linear (compiler: lex → parse → typecheck → codegen)
 - Coordinators branch (don't fake sequence when it dispatches parallel operations)
 - Don't force structure that doesn't match the code
+- If the code uses branching or loops (if/switch/while), reflect that shape instead of a straight line.
 </structure_rules>
 
 <edge_semantics>
@@ -68,6 +69,7 @@ Edge labels:
 - 2-4 words, present-tense verb phrase
 - Good: "parses tokens", "builds AST", "validates input"
 - Bad: "runs the parser and builds the abstract syntax tree"
+- Labels must describe a direct call or data transfer between the two nodes.
 </edge_semantics>
 
 <cross_trace_rules>

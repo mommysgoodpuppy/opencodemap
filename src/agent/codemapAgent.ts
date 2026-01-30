@@ -13,6 +13,7 @@
  */
 
 import { streamText, ModelMessage } from 'ai';
+import * as fs from 'fs';
 import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import { getAIClient, getModelName, isConfigured, getLanguage } from './baseClient';
 import { loadPrompt, loadStagePrompt, loadTraceStagePrompt, loadMaximizeParallelToolCallsAddon, loadMermaidPrompt } from '../prompts';
@@ -94,6 +95,290 @@ interface TraceProcessingOptions {
 interface MermaidProcessingResult {
   diagram?: string;
   error?: string;
+}
+
+interface LocationMismatch {
+  traceId: string;
+  locationId: string;
+  path: string;
+  lineNumber: number;
+  expected: string;
+  actual: string;
+}
+
+const LINE_NORMALIZE_REGEX = /\s+/g;
+const MAX_FIX_SCAN_FILES = 5000;
+const MAX_FIX_SCAN_BYTES = 2 * 1024 * 1024;
+const ALLOWED_FIX_EXTS = new Set([
+  '.re', '.ml', '.mli', '.res', '.resi',
+  '.ts', '.tsx', '.js', '.jsx', '.json',
+  '.py', '.rs', '.go', '.java', '.kt',
+  '.cs', '.cpp', '.c', '.h', '.hpp',
+  '.rb', '.php',
+]);
+const IGNORED_DIRS = new Set([
+  '.git', 'node_modules', 'dist', 'build', 'out', '.next', 'coverage',
+  '.vscode', '.idea', '.cache',
+]);
+
+function normalizeLine(value: string): string {
+  return value.replace(LINE_NORMALIZE_REGEX, ' ').trim();
+}
+
+function readFileLines(filePath: string): string[] | null {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return raw.split(/\r?\n/);
+  } catch {
+    return null;
+  }
+}
+
+function validateCodemapLocations(codemap: Codemap): LocationMismatch[] {
+  const mismatches: LocationMismatch[] = [];
+  const fileCache = new Map<string, string[]>();
+
+  for (const trace of codemap.traces) {
+    for (const location of trace.locations) {
+      const expected = location.lineContent ?? '';
+      if (!location.path || !Number.isFinite(location.lineNumber)) {
+        mismatches.push({
+          traceId: trace.id,
+          locationId: location.id,
+          path: location.path,
+          lineNumber: location.lineNumber,
+          expected,
+          actual: '',
+        });
+        continue;
+      }
+
+      let lines = fileCache.get(location.path);
+      if (!lines) {
+        const loaded = readFileLines(location.path);
+        if (!loaded) {
+          mismatches.push({
+            traceId: trace.id,
+            locationId: location.id,
+            path: location.path,
+            lineNumber: location.lineNumber,
+            expected,
+            actual: '',
+          });
+          continue;
+        }
+        lines = loaded;
+        fileCache.set(location.path, lines);
+      }
+
+      const idx = location.lineNumber - 1;
+      if (idx < 0 || idx >= lines.length) {
+        mismatches.push({
+          traceId: trace.id,
+          locationId: location.id,
+          path: location.path,
+          lineNumber: location.lineNumber,
+          expected,
+          actual: '',
+        });
+        continue;
+      }
+
+      const actual = lines[idx] ?? '';
+      if (normalizeLine(actual) !== normalizeLine(expected)) {
+        mismatches.push({
+          traceId: trace.id,
+          locationId: location.id,
+          path: location.path,
+          lineNumber: location.lineNumber,
+          expected,
+          actual,
+        });
+      }
+    }
+  }
+
+  return mismatches;
+}
+
+function findUniqueLineMatch(
+  target: string,
+  workspaceRoot: string | undefined,
+  candidatePaths: string[],
+  fileCache: Map<string, string[]>
+): { path: string; lineNumber: number; lineContent: string } | null {
+  const normalizedTarget = normalizeLine(target);
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const matches: Array<{ path: string; lineNumber: number; lineContent: string }> = [];
+
+  const searchInFile = (filePath: string): void => {
+    let lines = fileCache.get(filePath);
+    if (!lines) {
+      const loaded = readFileLines(filePath);
+      if (!loaded) {
+        return;
+      }
+      lines = loaded;
+      fileCache.set(filePath, lines);
+    }
+    for (let i = 0; i < lines.length; i++) {
+      if (normalizeLine(lines[i]) === normalizedTarget) {
+        matches.push({ path: filePath, lineNumber: i + 1, lineContent: lines[i] });
+        if (matches.length > 1) {
+          return;
+        }
+      }
+    }
+  };
+
+  for (const filePath of candidatePaths) {
+    searchInFile(filePath);
+    if (matches.length > 1) {
+      return null;
+    }
+  }
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  if (!workspaceRoot) {
+    return null;
+  }
+
+  let scanned = 0;
+  const stack = [workspaceRoot];
+  while (stack.length > 0 && scanned < MAX_FIX_SCAN_FILES) {
+    const dir = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (scanned >= MAX_FIX_SCAN_FILES) {
+        break;
+      }
+      if (entry.name.startsWith('.')) {
+        if (!IGNORED_DIRS.has(entry.name)) {
+          continue;
+        }
+      }
+      const fullPath = `${dir}/${entry.name}`.replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name)) {
+          stack.push(fullPath);
+        }
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      const ext = fullPath.slice(fullPath.lastIndexOf('.'));
+      if (!ALLOWED_FIX_EXTS.has(ext)) {
+        continue;
+      }
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (stat.size > MAX_FIX_SCAN_BYTES) {
+        continue;
+      }
+      scanned += 1;
+      searchInFile(fullPath);
+      if (matches.length > 1) {
+        return null;
+      }
+    }
+  }
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function applyLocationFixes(
+  codemap: Codemap,
+  workspaceRoot?: string
+): { fixed: number; unmatched: number; details: Array<{
+  traceId: string;
+  locationId: string;
+  from: { path: string; lineNumber: number };
+  to: { path: string; lineNumber: number };
+}> } {
+  let fixed = 0;
+  let unmatched = 0;
+  const details: Array<{
+    traceId: string;
+    locationId: string;
+    from: { path: string; lineNumber: number };
+    to: { path: string; lineNumber: number };
+  }> = [];
+  const fileCache = new Map<string, string[]>();
+  const candidatePaths = Array.from(
+    new Set(
+      codemap.traces.flatMap((trace) =>
+        trace.locations.map((location) => location.path).filter(Boolean)
+      )
+    )
+  );
+
+  for (const trace of codemap.traces) {
+    for (const location of trace.locations) {
+      if (!location.path) {
+        unmatched += 1;
+        continue;
+      }
+      let lines = fileCache.get(location.path);
+      if (!lines) {
+        const loaded = readFileLines(location.path);
+        if (!loaded) {
+          unmatched += 1;
+          continue;
+        }
+        lines = loaded;
+        fileCache.set(location.path, lines);
+      }
+      const idx = location.lineNumber - 1;
+      const currentLine = idx >= 0 && idx < lines.length ? lines[idx] : '';
+      if (normalizeLine(currentLine) === normalizeLine(location.lineContent ?? '')) {
+        continue;
+      }
+      const match = findUniqueLineMatch(
+        location.lineContent ?? '',
+        workspaceRoot,
+        candidatePaths,
+        fileCache
+      );
+      if (!match) {
+        unmatched += 1;
+        continue;
+      }
+      const from = { path: location.path, lineNumber: location.lineNumber };
+      location.path = match.path;
+      location.lineNumber = match.lineNumber;
+      location.lineContent = match.lineContent;
+      fixed += 1;
+      details.push({ traceId: trace.id, locationId: location.id, from, to: { path: match.path, lineNumber: match.lineNumber } });
+    }
+  }
+
+  return { fixed, unmatched, details };
+}
+
+function buildLocationMismatchFeedback(mismatches: LocationMismatch[]): string {
+  const lines = mismatches.slice(0, 8).map((m) => {
+    const actual = m.actual ? `actual="${m.actual.trim()}"` : 'actual="<missing>"';
+    return `- ${m.path}:${m.lineNumber} (${m.locationId}) expected="${m.expected.trim()}" ${actual}`;
+  });
+  return (
+    'Some codemap locations do not match the file contents. Fix lineNumber and/or lineContent for these locations and keep direct call edges only:\n' +
+    lines.join('\n')
+  );
 }
 
 function toCoreMessages(
@@ -796,6 +1081,30 @@ export async function generateCodemap(
         continue;
       }
 
+      const mismatches = validateCodemapLocations(extracted);
+      if (mismatches.length > 0) {
+        logger.warn(`Stage 2 - Location verification failed (${mismatches.length} mismatches)`);
+        const fixResult = applyLocationFixes(extracted, workspaceRoot);
+        if (fixResult.fixed > 0) {
+          logger.info(`Stage 2 - Auto-fixed ${fixResult.fixed} locations`);
+        }
+        const remaining = validateCodemapLocations(extracted);
+        if (remaining.length > 0) {
+          if (attempt < maxStage2Attempts) {
+            messages.push({
+              role: 'user',
+              content: buildLocationMismatchFeedback(remaining),
+            });
+            callbacks.onMessage?.(
+              'user',
+              `[Stage 2] Retrying due to location mismatch (attempt ${attempt + 1}/${maxStage2Attempts})...`
+            );
+            continue;
+          }
+          logger.warn('Stage 2 - Proceeding with mismatched locations after final attempt');
+        }
+      }
+
       resultCodemap = extracted;
       logger.info(`Stage 2 - Codemap extracted successfully: ${resultCodemap.traces.length} traces`);
       logger.debug(`Stage 2 - Codemap title: ${resultCodemap.title}`);
@@ -826,14 +1135,16 @@ export async function generateCodemap(
         logger.warn(`Failed to emit stage12 context: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      mermaidPromise = processMermaidDiagram(
-        systemPrompt,
-        messages,
-        currentDate,
-        language,
-        callbacks,
-        abortSignal
-      );
+      if (mode === 'fast') {
+        mermaidPromise = processMermaidDiagram(
+          systemPrompt,
+          messages,
+          currentDate,
+          language,
+          callbacks,
+          abortSignal
+        );
+      }
       break;
     }
 
@@ -896,14 +1207,41 @@ export async function generateCodemap(
       
       logger.info(`Trace processing complete: ${successCount} success, ${errorCount} errors`);
 
-      if (mermaidResult) {
-        if (mermaidResult.error) {
-          logger.error(`[Mermaid] Mermaid generation failed: ${mermaidResult.error}`);
-          callbacks.onMessage?.('error', `Mermaid diagram error: ${mermaidResult.error}`);
-          throw new Error(`Mermaid diagram failed to compile: ${mermaidResult.error}`);
-        } else if (mermaidResult.diagram) {
-          resultCodemap.mermaidDiagram = mermaidResult.diagram;
-          logger.info(`[Mermaid] Diagram stored (${mermaidResult.diagram.length} chars)`);
+      let resolvedMermaid = mermaidResult;
+      if (mode === 'smart') {
+        const diagramContext = resultCodemap.traces
+          .filter((t) => t.traceTextDiagram && t.traceTextDiagram.trim().length > 0)
+          .map((t) => `Trace ${t.id}: ${t.title}\n${t.traceTextDiagram}`)
+          .join('\n\n');
+        const mermaidMessages = diagramContext
+          ? [
+              ...messages,
+              {
+                role: 'user' as const,
+                content:
+                  'Use these verified trace trees as the source of truth for structure and edges:\n\n' +
+                  diagramContext,
+              },
+            ]
+          : messages;
+        resolvedMermaid = await processMermaidDiagram(
+          systemPrompt,
+          mermaidMessages,
+          currentDate,
+          language,
+          callbacks,
+          abortSignal
+        );
+      }
+
+      if (resolvedMermaid) {
+        if (resolvedMermaid.error) {
+          logger.error(`[Mermaid] Mermaid generation failed: ${resolvedMermaid.error}`);
+          callbacks.onMessage?.('error', `Mermaid diagram error: ${resolvedMermaid.error}`);
+          throw new Error(`Mermaid diagram failed to compile: ${resolvedMermaid.error}`);
+        } else if (resolvedMermaid.diagram) {
+          resultCodemap.mermaidDiagram = resolvedMermaid.diagram;
+          logger.info(`[Mermaid] Diagram stored (${resolvedMermaid.diagram.length} chars)`);
           callbacks.onMessage?.('assistant', '[Mermaid] Diagram saved to codemap');
         }
       }
@@ -926,6 +1264,24 @@ export async function generateCodemap(
             throw new Error(`Mermaid diagram failed to compile: ${mermaidResult.error}`);
           }
         }
+      }
+    }
+
+    if (resultCodemap) {
+      const fixResult = applyLocationFixes(resultCodemap, workspaceRoot);
+      if (fixResult.fixed > 0 || fixResult.unmatched > 0) {
+        logger.info(
+          `Verification stage: fixed ${fixResult.fixed} locations, ${fixResult.unmatched} unmatched`
+        );
+        resultCodemap.metadata = {
+          ...(resultCodemap.metadata ?? {}),
+          verification: {
+            fixedLocations: fixResult.fixed,
+            unmatchedLocations: fixResult.unmatched,
+            fixedDetails: fixResult.details,
+          },
+        };
+        callbacks.onCodemapUpdate?.(resultCodemap);
       }
     }
 

@@ -60,6 +60,16 @@ export interface CodemapMetadata {
     branch?: string;
     dirty?: boolean;
   };
+  verification?: {
+    fixedLocations?: number;
+    unmatchedLocations?: number;
+    fixedDetails?: Array<{
+      traceId: string;
+      locationId: string;
+      from: { path: string; lineNumber: number };
+      to: { path: string; lineNumber: number };
+    }>;
+  };
 }
 
 export interface CodemapSuggestion {

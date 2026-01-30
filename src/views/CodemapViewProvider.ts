@@ -1207,7 +1207,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
       // Save codemap to storage if generation succeeded
       const codemap = this._codemap as Codemap | null;
       if (codemap) {
-        const metadata = this._buildCodemapMetadata(workspaceRoot);
+        const metadata = { ...(codemap.metadata ?? {}), ...this._buildCodemapMetadata(workspaceRoot) };
         const updatedCodemap: Codemap = {
           ...(codemap as Codemap),
           workspacePath: workspaceRoot || codemap.workspacePath,
@@ -1323,7 +1323,7 @@ export class CodemapViewProvider implements vscode.WebviewViewProvider {
             }
           }
           if (!suppressFailureSave && this._lastGenerationError && !codemapSaved) {
-            const metadata = this._buildCodemapMetadata(workspaceRoot);
+            const metadata = { ...(baseCodemap?.metadata ?? {}), ...this._buildCodemapMetadata(workspaceRoot) };
             const cancelled = this._lastGenerationError.toLowerCase().includes('cancelled');
             const failureDescription = cancelled
               ? 'Generation cancelled by user'
