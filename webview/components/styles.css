@@ -1458,6 +1458,20 @@ body {
   flex-shrink: 0;
 }
 
+.diagram-fix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: var(--vscode-notificationsInfoIcon-foreground, #75beff);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.diagram-fix svg {
+  display: block;
+}
+
 .diagram-title {
   font-size: 13px;
   color: var(--vscode-foreground, #cccccc);

@@ -112,8 +112,8 @@ export const CodemapList: React.FC<CodemapListProps> = ({
     const lower = searchText.toLowerCase();
     return history.filter(
       (item) =>
-        item.codemap.title.toLowerCase().includes(lower) ||
-        item.codemap.description.toLowerCase().includes(lower)
+        (item.codemap.title || '').toLowerCase().includes(lower) ||
+        (item.codemap.description || '').toLowerCase().includes(lower)
     );
   }, [history, searchText]);
 
@@ -406,9 +406,9 @@ export const CodemapList: React.FC<CodemapListProps> = ({
             </div>
             <div className="codemap-item-desc">
               <ScrambleText
-                text={item.codemap.description.length > 100
-                  ? `${item.codemap.description.slice(0, 100)}...`
-                  : item.codemap.description}
+                text={(item.codemap.description || '').length > 100
+                  ? `${(item.codemap.description || '').slice(0, 100)}...`
+                  : (item.codemap.description || '')}
                 active={Boolean(item.isUnread)}
               />
             </div>

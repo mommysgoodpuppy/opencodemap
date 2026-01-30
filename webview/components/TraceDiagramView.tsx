@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Wrench } from 'lucide-react';
 import type { CodemapTrace, CodemapLocation } from '../types';
 
 /**
@@ -210,6 +211,7 @@ interface TraceDiagramViewProps {
   allLocations: Map<string, CodemapLocation>;
   onLocationClick: (location: CodemapLocation) => void;
   onFileClick: (filePath: string, lineNumber?: number) => void;
+  fixedLocationIds?: Set<string>;
 }
 
 /**
@@ -220,6 +222,7 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
   allLocations,
   onLocationClick,
   onFileClick,
+  fixedLocationIds,
 }) => {
   const { rootTitle, rows } = useMemo(() => {
     if (!trace.traceTextDiagram) {
@@ -270,6 +273,10 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
       <div className="diagram-body">
         {rows.map((row) => {
           const isClickable = row.link != null;
+          const isFixedLocation =
+            row.link?.type === 'location' &&
+            row.link.locationId &&
+            fixedLocationIds?.has(row.link.locationId);
           
           return (
             <div 
@@ -290,7 +297,14 @@ export const TraceDiagramView: React.FC<TraceDiagramViewProps> = ({
               
               {/* Location badge */}
               {row.link?.type === 'location' && row.link.locationId && (
-                <span className="diagram-badge">{row.link.locationId}</span>
+                <>
+                  <span className="diagram-badge">{row.link.locationId}</span>
+                  {isFixedLocation && (
+                    <span className="diagram-fix" title="Auto-corrected location">
+                      <Wrench size={12} />
+                    </span>
+                  )}
+                </>
               )}
               
               {/* Title */}

@@ -68,6 +68,7 @@ export interface CodemapMetadata {
       locationId: string;
       from: { path: string; lineNumber: number };
       to: { path: string; lineNumber: number };
+      matchKind?: 'exact' | 'approximate';
     }>;
   };
 }

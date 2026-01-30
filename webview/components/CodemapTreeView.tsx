@@ -248,6 +248,7 @@ interface TraceSectionProps {
   trace: CodemapTrace;
   traceIndex: number;
   allLocations: Map<string, CodemapLocation>;
+  fixedLocationIds: Set<string>;
   onLocationClick: (location: CodemapLocation) => void;
   onFileClick: (filePath: string, lineNumber?: number) => void;
   isProcessing?: boolean;
@@ -263,6 +264,7 @@ const TraceSection: React.FC<TraceSectionProps> = ({
   trace,
   traceIndex,
   allLocations,
+  fixedLocationIds,
   onLocationClick,
   onFileClick,
   isProcessing,
@@ -357,6 +359,7 @@ const TraceSection: React.FC<TraceSectionProps> = ({
             allLocations={allLocations}
             onLocationClick={onLocationClick}
             onFileClick={onFileClick}
+            fixedLocationIds={fixedLocationIds}
           />
         </div>
       )}
@@ -375,6 +378,16 @@ export const CodemapTreeView: React.FC<CodemapTreeViewProps> = ({
   canRetryTraces,
   onRetryTrace,
 }) => {
+  const fixedLocationIds = useMemo(() => {
+    const ids = new Set<string>();
+    codemap?.metadata?.verification?.fixedDetails?.forEach((detail) => {
+      if (detail.locationId) {
+        ids.add(detail.locationId);
+      }
+    });
+    return ids;
+  }, [codemap]);
+
   // Build a map of all locations across all traces for cross-trace references
   const allLocations = useMemo(() => {
     const map = new Map<string, CodemapLocation>();
@@ -420,6 +433,7 @@ export const CodemapTreeView: React.FC<CodemapTreeViewProps> = ({
           trace={trace}
           traceIndex={idx}
           allLocations={allLocations}
+          fixedLocationIds={fixedLocationIds}
           onLocationClick={onLocationClick}
           onFileClick={handleFileClick}
           isProcessing={isProcessing}

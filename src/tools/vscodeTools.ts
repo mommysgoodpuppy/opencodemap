@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
-import { tool } from 'ai';
-import { z } from 'zod';
+import * as vscode from "vscode";
+import { tool } from "ai";
+import { z } from "zod";
 
 type JsonSchema = {
   type?: string;
@@ -16,25 +16,33 @@ function parseXmlParameters(text: string): Record<string, string> | null {
     const key = match[1]?.trim();
     const value = match[2]?.trim();
     if (key) {
-      params[key] = value ?? '';
+      params[key] = value ?? "";
     }
   }
   return Object.keys(params).length > 0 ? params : null;
 }
 
-function coerceToolInput(schema: JsonSchema | undefined, input: unknown): unknown {
+function coerceToolInput(
+  schema: JsonSchema | undefined,
+  input: unknown,
+): unknown {
   const properties = schema?.properties ? Object.keys(schema.properties) : [];
   const required = Array.isArray(schema?.required) ? schema!.required! : [];
   const preferredKey =
-    ['query', 'search', 'q', 'text', 'pattern'].find((k) => properties.includes(k)) ||
+    ["query", "search", "q", "text", "pattern"].find((k) =>
+      properties.includes(k)
+    ) ||
     (required.length === 1 ? required[0] : undefined) ||
     (properties.length === 1 ? properties[0] : undefined);
 
-  if (typeof input === 'string') {
+  if (typeof input === "string") {
     const trimmed = input.trim();
     if (trimmed.length > 0) {
       // Try JSON first.
-      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      if (
+        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]"))
+      ) {
         try {
           return JSON.parse(trimmed);
         } catch {
@@ -52,12 +60,12 @@ function coerceToolInput(schema: JsonSchema | undefined, input: unknown): unknow
     }
   }
 
-  if (input && typeof input === 'object') {
+  if (input && typeof input === "object") {
     return input;
   }
 
   if (preferredKey) {
-    return { [preferredKey]: '' };
+    return { [preferredKey]: "" };
   }
 
   return input ?? {};
@@ -69,19 +77,22 @@ function coerceToolInput(schema: JsonSchema | undefined, input: unknown): unknow
 export function wrapVsCodeTool(info: vscode.LanguageModelToolInformation) {
   return tool({
     description: info.description,
-    // VS Code uses JSON schema for inputSchema. 
+    // VS Code uses JSON schema for inputSchema.
     // AI SDK's 'tool' expects a Zod schema or a JSON schema object if using certain versions.
     // Since inputSchema is already a JSON schema, we can try to use it.
     // Note: AI SDK 'tool' usually wants a Zod schema for 'parameters'.
-    // If we don't have a Zod schema, we can use z.any() and validate manually, 
+    // If we don't have a Zod schema, we can use z.any() and validate manually,
     // or just pass the schema if the library supports it.
-    inputSchema: z.any().describe(JSON.stringify(info.inputSchema)),
+    // Use a permissive object schema so OpenAI-compatible endpoints accept parameters.type=object.
+    inputSchema: z.object({}).passthrough(),
     execute: async (input) => {
-      const coercedInput = coerceToolInput(info.inputSchema as JsonSchema | undefined, input);
-      const toolInput =
-        coercedInput && typeof coercedInput === 'object'
-          ? coercedInput
-          : { value: coercedInput ?? '' };
+      const coercedInput = coerceToolInput(
+        info.inputSchema as JsonSchema | undefined,
+        input,
+      );
+      const toolInput = coercedInput && typeof coercedInput === "object"
+        ? coercedInput
+        : { value: coercedInput ?? "" };
       try {
         const result = await vscode.lm.invokeTool(
           info.name,
@@ -93,28 +104,28 @@ export function wrapVsCodeTool(info: vscode.LanguageModelToolInformation) {
               countTokens: async (content) => {
                 // Better estimation: 1 token ~= 4 characters for English
                 return Math.ceil(JSON.stringify(content).length / 4);
-              }
+              },
             },
           },
-          new vscode.CancellationTokenSource().token
+          new vscode.CancellationTokenSource().token,
         );
 
         // VS Code tool results are often strings or complex objects.
         // We'll return the string content for the AI.
-        if (typeof result.content === 'string') {
+        if (typeof result.content === "string") {
           return result.content;
         }
-        
+
         // Handle parts if result.content is an array of parts
         if (Array.isArray(result.content)) {
           return result.content
-            .map(part => {
+            .map((part) => {
               if (part instanceof vscode.LanguageModelTextPart) {
                 return part.value;
               }
               return JSON.stringify(part);
             })
-            .join('\n');
+            .join("\n");
         }
 
         return String(result.content);
@@ -125,7 +136,7 @@ export function wrapVsCodeTool(info: vscode.LanguageModelToolInformation) {
   });
 }
 
-const SELECTED_TOOLS_KEY = 'codemap.selectedVsCodeTools';
+const SELECTED_TOOLS_KEY = "codemap.selectedVsCodeTools";
 
 /**
  * QuickPick UI to select tools from the VS Code registry.
@@ -133,32 +144,40 @@ const SELECTED_TOOLS_KEY = 'codemap.selectedVsCodeTools';
 export async function pickVsCodeTools(context: vscode.ExtensionContext) {
   const tools = vscode.lm.tools;
   if (tools.length === 0) {
-    vscode.window.showInformationMessage('No VS Code LM tools found in the registry.');
+    vscode.window.showInformationMessage(
+      "No VS Code LM tools found in the registry.",
+    );
     return;
   }
 
-  const current = new Set<string>(context.globalState.get<string[]>(SELECTED_TOOLS_KEY, []));
+  const current = new Set<string>(
+    context.globalState.get<string[]>(SELECTED_TOOLS_KEY, []),
+  );
 
-  const items: vscode.QuickPickItem[] = tools.map(t => ({
+  const items: vscode.QuickPickItem[] = tools.map((t) => ({
     label: t.name,
-    description: t.tags?.length ? t.tags.map(x => `#${x}`).join(' ') : undefined,
+    description: t.tags?.length
+      ? t.tags.map((x) => `#${x}`).join(" ")
+      : undefined,
     detail: t.description,
     picked: current.has(t.name),
   }));
 
   const picked = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    title: 'Select VS Code Tools for Codemap Agent',
+    title: "Select VS Code Tools for Codemap Agent",
     matchOnDescription: true,
     matchOnDetail: true,
   });
 
   if (!picked) return;
 
-  const names = picked.map(p => p.label);
+  const names = picked.map((p) => p.label);
   await context.globalState.update(SELECTED_TOOLS_KEY, names);
 
-  vscode.window.showInformationMessage(`Enabled ${names.length} VS Code tools for Codemap.`);
+  vscode.window.showInformationMessage(
+    `Enabled ${names.length} VS Code tools for Codemap.`,
+  );
 }
 
 /**
@@ -167,16 +186,16 @@ export async function pickVsCodeTools(context: vscode.ExtensionContext) {
 export function getSelectedVsCodeTools(context: vscode.ExtensionContext) {
   const names = context.globalState.get<string[]>(SELECTED_TOOLS_KEY, []);
   const registryTools = vscode.lm.tools;
-  
+
   const wrappedTools: Record<string, any> = {};
-  
+
   for (const name of names) {
-    const info = registryTools.find(t => t.name === name);
+    const info = registryTools.find((t) => t.name === name);
     if (info) {
       // Use the tool name as the key for AI SDK
-      wrappedTools[name.replace(/[^a-zA-Z0-9_]/g, '_')] = wrapVsCodeTool(info);
+      wrappedTools[name] = wrapVsCodeTool(info);
     }
   }
-  
+
   return wrappedTools;
 }
